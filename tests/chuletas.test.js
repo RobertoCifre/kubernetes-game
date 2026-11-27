@@ -54,13 +54,13 @@ const R = {
   46: [/aws eks describe-cluster .*--query cluster\.version/],
   47: [/kubectl get pods .*-o wide/, /PodDisruptionBudget|PDB/, /disruption budget/],
   48: [/ProviderID/, /aws ec2 terminate-instances/],
-  49: [/coredns/, /kubectl scale deployment coredns/],
+  49: [/coredns/, /kubectl scale deployment /, /CoreDNS se arregla como cualquier Deployment|es un Deployment más/],
   50: [/kubectl set image deployment\//, /kubectl set selector service/, /kubectl set env deployment\//],
   51: [/kubectl exec -it \S+ -n \S+ -- sh/, /\bps\b/, /\/proc\/1\/cmdline/],
   52: [/memory\.max/],
   53: [/cpu\.max/],
   54: [/\/proc\/1\/status/, /CapEff/],
-  55: [/automountServiceAccountToken/, /kubectl patch (serviceaccount|sa) /],
+  55: [/automountServiceAccountToken/, /kubectl (edit|patch) (serviceaccount|sa) /],
   56: [/kubectl logs \S+ -c /, /Init:0\/1/],
   57: [/aws eks create-pod-identity-association/, /env \| grep AWS_/],
   58: [/kubectl debug -it \S+ .*--target=/],
@@ -72,6 +72,20 @@ for (const [n, pats] of Object.entries(R)) {
   const no = pats.filter(p => !p.test(txt));
   if (no.length) { faltan++; console.log(`  ❌ N${n}: falta en las chuletas ${no.map(String).join("  ·  ")}`); }
 }
+// índice por recurso (CHULETA-COMANDOS): cada tipo de problema dice dónde se crea, se cambia y se mira
+const RECURSOS = ["Deployment", "Pod", "Service", "DNS", "ConfigMap / Secret", "Versiones", "Job / CronJob", "Escalado y cuotas",
+                  "Nodos", "Permisos", "Seguridad del Pod", "Red entre Pods", "Dentro del contenedor", "AWS"];
+for (const r of RECURSOS) if (!txt.includes(`| **${r}**`)) { faltan++; console.log(`  ❌ el índice por recurso no tiene la fila «${r}»`); }
+// la tabla de diagnóstico (CHULETA-COMANDOS, sección 7) dice, para cada síntoma, dónde se arregla
+const cabDiag = "| STATUS / síntoma | Qué pasa | Qué miro primero | Se arregla en |";
+const lineasDiag = [];
+{ const l = txt.split("\n"); const i = l.indexOf(cabDiag);
+  if (i < 0) { faltan++; console.log("  ❌ la tabla de diagnóstico no tiene la columna «Se arregla en»"); }
+  else for (let k = i + 2; k < l.length && l[k].startsWith("|"); k++) lineasDiag.push(l[k]); }
+for (const l of lineasDiag) if (l.split("|").length !== 6 || !l.split("|")[4].trim()) { faltan++; console.log(`  ❌ fila de diagnóstico sin «Se arregla en»: ${l.slice(0, 60)}`); }
+for (const s of ["`Pending`", "`ErrImagePull`", "`CreateContainerConfigError`", "`CrashLoopBackOff`", "`OOMKilled`", "`StartError`", "`Running` pero `0/1`", "`RESTARTS`", "`Init:0/1`",
+                 "Service sin endpoints", "Service con endpoints", "OTRO namespace", "DNS", "`<unknown>`", "`drain`", "`NotReady`", "`Forbidden`", "versión nueva"])
+  if (!lineasDiag.some(l => l.split("|")[1].includes(s))) { faltan++; console.log(`  ❌ la tabla de diagnóstico no trata «${s}»`); }
 const cubiertos = Object.keys(R).length;
 if (cubiertos !== 60) { faltan++; console.log(`  ❌ la tabla cubre ${cubiertos} niveles, no 60`); }
 console.log(faltan ? `${faltan} FALLOS` : "TODO OK: los 60 niveles tienen sus comandos en las chuletas");

@@ -7,6 +7,8 @@ Todas sirven para el EKS real y para el juego. Empieza por la de comandos; las d
 | Lo que ves | Chuleta | Sección |
 |---|---|---|
 | No sé ni por dónde empezar | CHULETA-COMANDOS | Lo primero: tres palabras |
+| Sé qué falla (un Service, un nodo, un permiso…) pero no cómo crearlo o cambiarlo | CHULETA-COMANDOS | 🔎 Índice por recurso |
+| Veo un STATUS o un síntoma y no sé dónde se arregla | CHULETA-COMANDOS | 7. Diagnosticar (columna «Se arregla en») |
 | Un Pod en `Pending` | CHULETA-DIAGNOSTICO | Pending |
 | Un Pod en `ErrImagePull` o `ImagePullBackOff` | CHULETA-DIAGNOSTICO | Imagen |
 | Un Pod en `CreateContainerConfigError` | CHULETA-DIAGNOSTICO | Configuración |

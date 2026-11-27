@@ -17,6 +17,27 @@
 
 ¿Y el puerto en el Deployment? No hace falta: nginx ya escucha en el 80 por dentro. El puerto se le dice al Service (`expose --port=80`), que es quien recibe las peticiones y las reparte.
 
+## 🔎 ¿Problema con…? Índice por recurso
+
+Busca el recurso que falla y ve a la sección. Los números son los de esta chuleta (1 Mirar · 2 Crear · 3 Cambiar · 4 Dentro de los Pods · 5 Borrar · 6 Nodos · 7 Diagnosticar).
+
+| Problema con… | Crearlo | Cambiarlo o arreglarlo | Mirarlo |
+|---|---|---|---|
+| **Deployment** (imagen, réplicas, variables, recursos, comando, sondas) | 2 · `create deployment` · YAML (CHULETA-YAML) | 3 · `set image` · `set env` · `set resources` · `scale` · `edit` · `patch` | 1 · `get deploy` · `describe deploy` |
+| **Pod** que no arranca o se reinicia | Lo crea su Deployment | Se arregla en su **Deployment** (3) · `delete pod` lo recrea (5) | 1 · `describe pod` · `logs` · `logs --previous` · tabla de 7 |
+| **Service** (no llega el tráfico, puertos, selector, IP pública) | 2 · `expose` (`--port`, `--target-port`, `--type`) | 3 · `set selector` · `edit svc` · `patch svc` | 1 · `get svc -o wide` · `get endpoints` · `describe svc` · CHULETA-RED |
+| **DNS** (los nombres no resuelven) | — | CoreDNS es un Deployment de `kube-system`: se arregla como cualquier Deployment (3) | 4 · `run … nslookup` · CHULETA-RED |
+| **ConfigMap / Secret** | 2 · `create configmap` · `create secret generic` | 3 · `edit configmap` (y `rollout restart`) | 4 · Leer un Secret |
+| **Versiones** (la nueva falla, volver atrás) | — | 3 · `rollout undo` · `rollout restart` | 3 · `rollout status` · `rollout history` |
+| **Job / CronJob** | 2 · `create job` · `create cronjob` | Se borran (5) y se vuelven a crear | 1 · `get jobs` · `logs job/<nombre>` |
+| **Escalado y cuotas** (HPA, ResourceQuota, PDB) | 2 · `autoscale` · `create quota` · `create pdb` | 3 · `set resources` · `edit` · `patch` · `scale` | 1 · `get hpa` · `describe quota` · `get pdb` · CHULETA-CAPACIDAD |
+| **Nodos** (no cabe, taints, labels, mantenimiento, nodo caído, más nodos) | 6 · node group | 3 · `label node` · `taint` · 6 · `cordon` · `drain` · `uncordon` · node group | 6 · `get nodes` · `describe node` · CHULETA-AWS-EKS |
+| **Permisos** (`Forbidden`, RBAC, ServiceAccounts) | 2 · `create serviceaccount` · `role` · `rolebinding` · `clusterrole` · `clusterrolebinding` | 5 · borrar el que sobra · 2 · crear el correcto · 3 · `edit` | 1 · `auth can-i` · CHULETA-SEGURIDAD |
+| **Seguridad del Pod** (Pod Security, root, capabilities) | YAML «restricted» en CHULETA-YAML | `apply -f -` con el securityContext (2) · 3 · `label namespace` | 1 · `get events` (*FailedCreate*) · CHULETA-SEGURIDAD |
+| **Red entre Pods** (NetworkPolicy) | YAML en CHULETA-YAML y CHULETA-RED | `apply -f -` (2) · `delete netpol` (5) | 1 · `get netpol` · `describe netpol` |
+| **Dentro del contenedor** (procesos, cgroups, token, imagen sin shell, init containers) | — | Lo que encuentres se arregla en 2 o 3 | 4 · `exec` · `debug` · 1 · `logs -c` · CHULETA-BAJO-EL-CAPO |
+| **AWS** (cuenta, versión del cluster, node group, credenciales de AWS para un Pod) | Pod Identity: CHULETA-BAJO-EL-CAPO | 6 · node group | `aws sts get-caller-identity` · `aws eks describe-cluster` · CHULETA-AWS-EKS |
+
 ## 0. Antes de nada: ¿dónde estoy?
 
 | Quiero… | Comando |
@@ -107,6 +128,7 @@ kubectl logs <pod> -n <ns> --previous    # ⭐ la del contenedor ANTERIOR (el qu
 kubectl logs <pod> -n <ns> -f            # seguir en vivo (Ctrl+C para salir)
 kubectl logs deploy/<nombre> -n <ns>     # de un pod cualquiera del deployment
 kubectl logs job/<nombre> -n <ns>        # salida de un Job
+kubectl logs <pod> -n <ns> -c <contenedor>   # un contenedor concreto (también los init containers)
 ```
 
 ### Eventos y consumo
@@ -125,6 +147,7 @@ kubectl top pods -n <ns>                              # CPU/RAM de los pods
 kubectl auth can-i create deployments -n <ns>                                  # yo
 kubectl auth can-i list pods -n <ns> --as=system:serviceaccount:<ns>:<sa>      # otra identidad
 kubectl auth can-i --list -n <ns>                                              # todo lo que puedo
+kubectl auth can-i list pods -A --as=system:serviceaccount:<ns>:<sa>           # en TODOS los namespaces
 ```
 
 ## 2. CREAR
@@ -165,6 +188,8 @@ kubectl create serviceaccount <sa> -n <ns>
 kubectl create role <rol> --verb=get,list,watch --resource=pods -n <ns>
 kubectl create rolebinding <nombre> --role=<rol> --serviceaccount=<ns>:<sa> -n <ns>
 kubectl create rolebinding <nombre> --clusterrole=view --serviceaccount=<ns>:<sa> -n <ns>
+kubectl create clusterrole <rol> --verb=get,list,watch --resource=pods                        # como un Role, pero sin namespace
+kubectl create clusterrolebinding <nombre> --clusterrole=<rol> --serviceaccount=<ns>:<sa>     # vale en TODOS los namespaces
 ```
 
 ### Crear desde YAML sin fichero (`apply -f -` con heredoc)
@@ -215,11 +240,16 @@ kubectl taint nodes <nodo> clave=valor:NoSchedule             # repeler Pods
 kubectl taint nodes <nodo> clave-                             # quitar el taint
 kubectl taint nodes --all clave-                              # quitarlo de todos los nodos
 
+# Labels de un namespace (p. ej. su nivel de Pod Security)
+kubectl label namespace <ns> clave=valor --overwrite
+
 # Editar cualquier cosa a mano (abre un editor con el YAML; guardar = aplicar)
-kubectl edit deployment <nombre> -n <ns>        # imagen, command, sondas, recursos, tolerations…
+kubectl edit deployment <nombre> -n <ns>        # imagen, command, sondas, recursos, tolerations, securityContext…
 kubectl edit svc <nombre> -n <ns>               # selector, port, targetPort, type
 kubectl edit configmap <nombre> -n <ns>         # ⚠️ si los Pods lo leen como variables, no lo ven hasta un  rollout restart
-kubectl edit resourcequota <nombre> -n <ns>     # subir o bajar una cuota
+kubectl edit resourcequota <nombre> -n <ns>     # cuotas del namespace
+kubectl edit serviceaccount <sa> -n <ns>        # la identidad de los Pods
+kubectl edit <tipo> <nombre> -n <ns>            # vale para cualquier objeto: hpa, pdb, netpol, role…
 #   en Linux suele abrir vi: "i" para escribir, Esc y ":wq" para guardar y salir, ":q!" para salir sin guardar
 #   para usar nano:  export KUBE_EDITOR=nano
 ```
@@ -233,16 +263,16 @@ kubectl patch deployment <nombre> -n <ns> --type=merge -p '{"spec":{"replicas":3
 # json: operaciones exactas sobre una ruta (útil en listas)
 kubectl patch deployment <nombre> -n <ns> --type=json \
   -p '[{"op":"replace","path":"/spec/template/spec/containers/0/image","value":"nginx:1.27-alpine"}]'
-#   otras rutas útiles («0» = el primer contenedor de la lista):
-#     /spec/template/spec/containers/0/command                     → ["sleep","3600"]
-#     /spec/template/spec/containers/0/readinessProbe/httpGet/path → "/"
-#     /spec/template/spec/containers/0/livenessProbe/httpGet/port  → 80
+#   otras rutas («0» = el primer contenedor de la lista; "value" = lo que quieras poner):
+#     /spec/template/spec/containers/0/command
+#     /spec/template/spec/containers/0/args
+#     /spec/template/spec/containers/0/readinessProbe/httpGet/path   (o …/port)
+#     /spec/template/spec/containers/0/livenessProbe/httpGet/path    (o …/port)
 #   "op": "replace" cambia un campo que existe · "add" lo crea · "remove" lo borra (sin "value")
 
 # otros objetos, con merge
-kubectl patch svc <nombre> -n <ns> -p '{"spec":{"ports":[{"port":80,"targetPort":8080}]}}'
-kubectl patch resourcequota <nombre> -n <ns> -p '{"spec":{"hard":{"pods":"10"}}}'
-kubectl patch serviceaccount <sa> -n <ns> -p '{"automountServiceAccountToken":false}'
+kubectl patch svc <nombre> -n <ns> -p '{"spec":{"ports":[{"port":<puerto>,"targetPort":<puerto-del-contenedor>}]}}'
+kubectl patch resourcequota <nombre> -n <ns> -p '{"spec":{"hard":{"pods":"<N>"}}}'
 ```
 
 Comillas simples por fuera y dobles por dentro. Sin `--type`, kubectl usa `strategic` (parecido a merge, pero sabe fusionar listas como `containers` por nombre).
@@ -274,6 +304,11 @@ kubectl run prueba --rm -it --image=busybox:1.37 -n <ns> -- wget -qO- -T 3 http:
 
 # Túnel desde tu PC a un Service o Pod (se queda abierto hasta Ctrl+C)
 kubectl port-forward svc/<servicio> 8080:80 -n <ns>   # luego, en OTRA terminal: curl http://localhost:8080
+
+# Imagen sin shell (exec no sirve): contenedor efímero de depuración dentro del Pod
+kubectl debug -it <pod> -n <ns> --image=busybox:1.37 --target=<contenedor>
+kubectl debug node/<nodo> -it --image=busybox:1.37    # depurar un nodo
+#   qué mirar dentro (PID 1, cgroups, capabilities, token): CHULETA-BAJO-EL-CAPO
 ```
 
 `busybox` trae `wget`, `nslookup` y `sh`, pero no `curl`.
@@ -294,6 +329,8 @@ kubectl delete deployment <nombre> -n <ns>
 kubectl delete svc <nombre> -n <ns>              # ⚠️ si era LoadBalancer, borra el balanceador de AWS
 kubectl delete cm <nombre> -n <ns>
 kubectl delete rolebinding <nombre> -n <ns>
+kubectl delete <tipo> <nombre> -n <ns>           # cualquier otro: secret, job, hpa, quota, netpol, role…
+kubectl delete clusterrolebinding <nombre>       # los de cluster van sin -n
 kubectl delete namespace <ns>                    # ⚠️ borra TODO lo que hay dentro
 ```
 
@@ -332,21 +369,29 @@ Más comandos de AWS: CHULETA-AWS-EKS.
 
 ## 7. Diagnosticar: qué significa cada STATUS y qué mirar
 
-| STATUS / síntoma | Qué pasa | Qué miro primero |
-|---|---|---|
-| `Pending` | No cabe en ningún nodo (falta CPU o memoria, taints, nodeSelector, nodos cordoned) | `describe pod` → Events: *Insufficient cpu*, *untolerated taint* |
-| `ErrImagePull` / `ImagePullBackOff` | No puede descargar la imagen (nombre o tag mal, o repo privado) | `describe pod` → Events: *not found* |
-| `CreateContainerConfigError` | Le falta un ConfigMap o Secret que usa | `describe pod` → Events: *configmap "x" not found* |
-| `CrashLoopBackOff` | Arranca y muere en bucle | `logs --previous` y `describe pod` → *Last State* |
-| `OOMKilled` (Exit Code 137) | Usó más memoria que su `limits` y el kernel lo mató | `describe pod` → *Limits* vs lo que necesita |
-| `Running` pero `0/1` | Vive, pero no pasa la *readiness probe*, así que no recibe tráfico | `describe pod` → *Readiness probe failed…* |
-| Menos Pods de los que pide el Deployment | El ReplicaSet no puede crearlos (cuota, PodSecurity) | `get events` → *FailedCreate* |
-| Service sin endpoints | El *selector* del Service no casa con las *labels* de los pods | `get svc -o wide` vs `get pods --show-labels` |
-| Service con endpoints que no responde | `targetPort` distinto del puerto del contenedor, o NetworkPolicy | `describe svc` → *TargetPort* |
-| Service LoadBalancer en `<pending>` | AWS aún lo crea (2-4 min) o no puede | `describe svc` → Events |
-| Nada resuelve nombres (DNS) | CoreDNS caído | `get deploy -n kube-system` → `coredns` |
-| `Unauthorized` en kubectl | Sesión AWS caducada o contexto equivocado | `aws sts get-caller-identity`, `aws sso login …` |
-| `Forbidden` | Estás autenticado pero RBAC no te deja | `kubectl auth can-i …` |
+| STATUS / síntoma | Qué pasa | Qué miro primero | Se arregla en |
+|---|---|---|---|
+| `Pending` | No cabe en ningún nodo (falta CPU o memoria, taints, nodeSelector, nodos cordoned) | `describe pod` → Events: *Insufficient cpu*, *untolerated taint* | 3 (`set resources`, labels, taints) · 6 (node group, `uncordon`) |
+| `ErrImagePull` / `ImagePullBackOff` | No puede descargar la imagen (nombre o tag mal, o repo privado) | `describe pod` → Events: *not found* | 3 (`set image`, `edit`) |
+| `CreateContainerConfigError` | Le falta un ConfigMap o Secret que usa | `describe pod` → Events: *configmap "x" not found* | 2 (crear lo que falta) |
+| `CrashLoopBackOff` | Arranca y muere en bucle | `logs --previous` y `describe pod` → *Last State* | 3 (`set env`, `edit`, `patch`) |
+| `OOMKilled` (Exit Code 137) | Usó más memoria que su `limits` y el kernel lo mató | `describe pod` → *Limits* vs lo que necesita | 3 (`set resources`) |
+| `StartError` / `RunContainerError` | El comando del contenedor no existe o no se puede lanzar | `describe pod` → *executable file not found* | 3 (`edit`, `patch` del command) |
+| `Running` pero `0/1` | Vive, pero no pasa la *readiness probe*, así que no recibe tráfico | `describe pod` → *Readiness probe failed…* | 3 (`edit`, `patch` de la sonda) |
+| `RESTARTS` que suben con el Pod `Running` | Falla la *liveness probe* y el kubelet lo reinicia | `describe pod` → *Liveness probe failed…* | 3 (`edit`, `patch` de la sonda) |
+| `Init:0/1` · `Init:CrashLoopBackOff` | Un init container no termina: espera algo o falla | `logs <pod> -c <init>` · `describe pod` → *Init Containers* | Lo que espere: 2 (crear el Service, el Secret…) |
+| Menos Pods de los que pide el Deployment | El ReplicaSet no puede crearlos (cuota, PodSecurity) | `get events` → *FailedCreate* | 3 (`edit` la cuota) · CHULETA-SEGURIDAD |
+| La versión nueva no termina de desplegarse | Los Pods nuevos fallan; los viejos siguen | `rollout status` · `get pods` | 3 (`rollout undo`) |
+| Service sin endpoints | El *selector* del Service no casa con las *labels* de los pods | `get svc -o wide` vs `get pods --show-labels` | 3 (`set selector`, `edit svc`) |
+| Service con endpoints que no responde | `targetPort` distinto del puerto del contenedor, o NetworkPolicy | `describe svc` → *TargetPort* | 3 (`edit svc`, `patch svc`) · CHULETA-RED |
+| Service LoadBalancer en `<pending>` | AWS aún lo crea (2-4 min) o no puede | `describe svc` → Events | Esperar, o 2 (`expose --type=LoadBalancer`) |
+| No llega a un Service de OTRO namespace | Los nombres cortos solo valen en el mismo namespace | `nslookup <servicio>.<namespace>` | Usa `<servicio>.<namespace>` · 3 (`set env`) |
+| Nada resuelve nombres (DNS) | CoreDNS caído | `get deploy -n kube-system` → `coredns` | 3: es un Deployment más |
+| HPA con TARGETS `<unknown>` | Los Pods no tienen `requests.cpu` (o falta metrics-server) | `describe hpa` | 3 (`set resources --requests`) |
+| `drain` que no acaba | Un PodDisruptionBudget no permite sacar más Pods | `get pdb` → ALLOWED DISRUPTIONS | 3 (`scale`) · CHULETA-CAPACIDAD |
+| Nodo `NotReady` | El kubelet o la instancia han caído | `describe node` → Conditions | 6 · CHULETA-AWS-EKS |
+| `Unauthorized` en kubectl | Sesión AWS caducada o contexto equivocado | `aws sts get-caller-identity`, `aws sso login …` | 0 (contexto) |
+| `Forbidden` | Estás autenticado pero RBAC no te deja | `kubectl auth can-i …` | 2 (role, rolebinding) · 5 (el que sobra) |
 
 El detalle de cada caso, con el mensaje exacto, está en CHULETA-DIAGNOSTICO.
 
