@@ -38,7 +38,7 @@ Each level is either a **mission** (fix the cluster; it's checked automatically)
 
 ## Cheat sheets and solutions
 
-- [`chuletas/`](chuletas) — the cheat sheets that are also built into the game (📚 button): commands by task, a troubleshooting tree by Pod status, YAML templates, networking, security, capacity, AWS CLI for EKS, and what's inside a container.
+- [`chuletas/`](chuletas) — the cheat sheets that are also built into the game (📚 button). They contain every command you need to solve all 60 levels (a test checks it): commands by task, a troubleshooting tree by Pod status, YAML templates, networking, security, capacity, AWS CLI for EKS, and what's inside a container.
 - [`docs/NIVELES.md`](docs/NIVELES.md) — ⚠️ **spoilers**: every level's setup, solution, hints and what it teaches.
 
 ## How it works
@@ -60,6 +60,7 @@ It's a simulator, not a real cluster: it supports the commands and flags the lev
 python construir.py               # Python 3; writes eks-quest.html
 node tests/niveles.test.js        # plays all 60 levels with their solutions
 node tests/trampas.test.js        # wrong or tricky "fixes" must NOT pass
+node tests/chuletas.test.js       # the cheat sheets contain the commands needed for every level
 ```
 
 | Path | Contents |

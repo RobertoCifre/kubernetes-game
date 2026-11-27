@@ -89,6 +89,7 @@ En EKS un nodo que falla no se repara: se termina y el node group (un Auto Scali
 ```bash
 kubectl get nodes                                         # ¿cuál está NotReady?
 kubectl get node <nodo> -o jsonpath='{.spec.providerID}'  # → i-…
+kubectl describe node <nodo> | grep ProviderID            # lo mismo, sin jsonpath
 kubectl drain <nodo> --ignore-daemonsets --delete-emptydir-data --timeout=120s   # si aún responde
 aws ec2 terminate-instances --instance-ids <i-…>
 kubectl get nodes -w                                      # aparece uno nuevo en unos minutos

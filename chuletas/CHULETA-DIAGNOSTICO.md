@@ -207,7 +207,8 @@ kubectl run prueba --rm -it --image=busybox:1.37 -n <ns> -- wget -qO- -T 3 http:
 
 ```bash
 kubectl run dns --rm -it --image=busybox:1.37 -n <ns> -- nslookup kubernetes.default
-kubectl get deploy coredns -n kube-system
+kubectl get deploy coredns -n kube-system                        # ¿READY 0/0? alguien lo escaló a 0
+kubectl scale deployment coredns --replicas=2 -n kube-system     # en EKS va con 2 réplicas
 ```
 
 ## HPA con TARGETS `<unknown>`

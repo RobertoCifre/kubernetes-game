@@ -171,6 +171,7 @@ Si ALLOWED DISRUPTIONS es 0, el drain se queda reintentando (`Cannot evict pod a
 
 ```bash
 kubectl get ds -A
+kubectl get ds kube-proxy -n kube-system      # DESIRED = en cuántos nodos debe haber uno · READY = cuántos funcionan
 kubectl get pods -n kube-system -o wide | grep aws-node
 ```
 

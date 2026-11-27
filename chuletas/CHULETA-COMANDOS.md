@@ -216,7 +216,10 @@ kubectl taint nodes <nodo> clave-                             # quitar el taint
 kubectl taint nodes --all clave-                              # quitarlo de todos los nodos
 
 # Editar cualquier cosa a mano (abre un editor con el YAML; guardar = aplicar)
-kubectl edit deployment <nombre> -n <ns>
+kubectl edit deployment <nombre> -n <ns>        # imagen, command, sondas, recursos, tolerations…
+kubectl edit svc <nombre> -n <ns>               # selector, port, targetPort, type
+kubectl edit configmap <nombre> -n <ns>         # ⚠️ si los Pods lo leen como variables, no lo ven hasta un  rollout restart
+kubectl edit resourcequota <nombre> -n <ns>     # subir o bajar una cuota
 #   en Linux suele abrir vi: "i" para escribir, Esc y ":wq" para guardar y salir, ":q!" para salir sin guardar
 #   para usar nano:  export KUBE_EDITOR=nano
 ```
@@ -230,6 +233,16 @@ kubectl patch deployment <nombre> -n <ns> --type=merge -p '{"spec":{"replicas":3
 # json: operaciones exactas sobre una ruta (útil en listas)
 kubectl patch deployment <nombre> -n <ns> --type=json \
   -p '[{"op":"replace","path":"/spec/template/spec/containers/0/image","value":"nginx:1.27-alpine"}]'
+#   otras rutas útiles («0» = el primer contenedor de la lista):
+#     /spec/template/spec/containers/0/command                     → ["sleep","3600"]
+#     /spec/template/spec/containers/0/readinessProbe/httpGet/path → "/"
+#     /spec/template/spec/containers/0/livenessProbe/httpGet/port  → 80
+#   "op": "replace" cambia un campo que existe · "add" lo crea · "remove" lo borra (sin "value")
+
+# otros objetos, con merge
+kubectl patch svc <nombre> -n <ns> -p '{"spec":{"ports":[{"port":80,"targetPort":8080}]}}'
+kubectl patch resourcequota <nombre> -n <ns> -p '{"spec":{"hard":{"pods":"10"}}}'
+kubectl patch serviceaccount <sa> -n <ns> -p '{"automountServiceAccountToken":false}'
 ```
 
 Comillas simples por fuera y dobles por dentro. Sin `--type`, kubectl usa `strategic` (parecido a merge, pero sabe fusionar listas como `containers` por nombre).
