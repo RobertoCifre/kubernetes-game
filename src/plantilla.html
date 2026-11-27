@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>EKS Quest · un juego para aprender Kubernetes</title>
+<meta name="description" content="Juego gratuito en el navegador para aprender kubectl y Amazon EKS arreglando un cluster simulado: 60 niveles, sin instalar nada.">
+<style>
+/*CSS*/
+</style>
+</head>
+<body>
+<header>
+  <h1>⎈ EKS QUEST</h1>
+  <span class="chip" id="rango">🐣 Becario</span>
+  <span class="chip" id="xp">0 XP</span>
+  <span class="chip" id="niv">0/60</span>
+  <div class="barra"><div id="prog"></div></div>
+  <button onclick="abrirChuletas()">📚 Chuletas</button>
+  <button onclick="if(confirm('¿Borrar la partida y empezar de cero?')){localStorage.removeItem('eksquest2');location.reload();}" title="Nueva partida">↺</button>
+</header>
+<main>
+  <aside>
+    <div class="num" id="numnivel">NIVEL 1</div>
+    <h2 id="titulo">…</h2>
+    <div class="tipo" id="tipo"></div>
+    <div id="mision"></div>
+    <div class="botones">
+      <button onclick="pedirPista()">💡 Pista <span class="c-dim">−20</span></button>
+      <button onclick="comprobar(false)">✔ Comprobar</button>
+      <button onclick="irA(P.actual)">↺ Repetir</button>
+      <button onclick="verSolucion()">📖 Solución</button>
+      <button id="btnSig" class="verde" onclick="irA(siguientePendiente(P.actual + 1) || Math.min(MAX, P.actual + 1))">▶ Siguiente</button>
+    </div>
+    <div id="pistas"></div>
+    <details open><summary>Niveles</summary><div id="niveles"></div></details>
+    <details open><summary>Cluster en vivo</summary><div id="mapa"></div></details>
+  </aside>
+  <section id="term">
+    <div id="salida"></div>
+    <div id="linea"><span id="prompt">$</span><input id="cmd" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="escribe un comando… (help)"></div>
+  </section>
+</main>
+<script>
+/*CHULETAS*/
+/*JS*/
+arrancarUI();
+</script>
+</body>
+</html>

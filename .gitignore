@@ -1,0 +1,9 @@
+# Exported Docker images
+*.tar
+# Editors and OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+__pycache__/
+node_modules/

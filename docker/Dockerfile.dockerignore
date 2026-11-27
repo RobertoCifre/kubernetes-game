@@ -1,0 +1,4 @@
+# Lista blanca: a la imagen solo va el juego
+*
+!eks-quest.html
+!docker/nginx-default.conf

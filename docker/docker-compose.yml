@@ -1,0 +1,16 @@
+# EKS Quest con Docker Compose.  Desde la carpeta raíz del proyecto:
+#   docker compose -f docker/docker-compose.yml up -d      → http://localhost:8080
+#   docker compose -f docker/docker-compose.yml down       → pararlo y borrar el contenedor
+services:
+  eks-quest:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    image: eks-quest:3.0
+    container_name: eks-quest
+    ports:
+      - "8080:8080"
+    read_only: true          # sistema de ficheros del contenedor en solo lectura
+    tmpfs:
+      - /tmp                 # nginx escribe sus temporales aquí
+    restart: unless-stopped
