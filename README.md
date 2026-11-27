@@ -61,6 +61,7 @@ python construir.py               # Python 3; writes eks-quest.html
 node tests/niveles.test.js        # plays all 60 levels with their solutions
 node tests/trampas.test.js        # wrong or tricky "fixes" must NOT pass
 node tests/chuletas.test.js       # the cheat sheets contain the commands needed for every level
+node tests/simulacro.test.js      # ~10,000 real kubectl/aws commands across all levels: no crashes, no "not supported"
 ```
 
 | Path | Contents |

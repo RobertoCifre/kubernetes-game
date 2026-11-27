@@ -42,7 +42,7 @@ function partirFuera(s, sep){            // parte por un separador fuera de comi
 }
 
 /* ---------- flags ---------- */
-const BOOL_LARGOS = ["all-namespaces","show-labels","no-headers","overwrite","ignore-daemonsets","delete-emptydir-data","force","rm","wait","watch","previous","follow","all","list","record","stdin","tty","current","approve","client","short","raw","help","quiet","disable-eviction","dry-run-server","recursive","timestamps","show-kind","local"];
+const BOOL_LARGOS = ["prefix","all-containers","all-namespaces","show-labels","no-headers","overwrite","ignore-daemonsets","delete-emptydir-data","force","rm","wait","watch","previous","follow","all","list","record","stdin","tty","current","approve","client","short","raw","help","quiet","disable-eviction","dry-run-server","recursive","timestamps","show-kind","local"];
 const VALOR_CORTOS = ["n","o","l","L","c","f","p","s","e"];
 function flags(args, verbo){
   const f = {}, pos = []; let tras = [];
@@ -202,6 +202,8 @@ function kubectl(a){
   const {f, pos, tras} = flags(a.slice(1), verbo);
   if (f.help || f.h){ return ayudaVerbo(verbo); }
   const ns = nsDeFlags(f);
+  const MUTANTES = ["create","expose","run","set","scale","autoscale","apply","replace","patch","label","annotate","taint","cordon","uncordon","drain","delete","rollout"];
+  if (f["dry-run"] !== undefined && f["dry-run"] !== "none" && f["dry-run"] !== false && MUTANTES.includes(verbo)) return enSeco(a, f);
   switch (verbo){
     case "version": out(f.client ? "Client Version: v1.36.1\nKustomize Version: v5.8.1" : `Client Version: v1.36.1\nKustomize Version: v5.8.1\nServer Version: ${K8S_VER}`); return 0;
     case "cluster-info": out(`Kubernetes control plane is running at https://0A1B2C3D4E5F60718293A4B5C6D7E8F9.yl4.${REGION}.eks.amazonaws.com\nCoreDNS is running at https://0A1B2C3D4E5F60718293A4B5C6D7E8F9.yl4.${REGION}.eks.amazonaws.com/api/v1/namespaces/kube-system/services/kube-dns:dns/proxy\n\nTo further debug and diagnose cluster problems, use 'kubectl cluster-info dump'.`); return 0;
@@ -233,12 +235,66 @@ function kubectl(a){
     case "api-resources": out(tabla([["NAME","SHORTNAMES","APIVERSION","NAMESPACED","KIND"], ...Object.entries(RECURSOS).map(([p, r]) => [p, r.cortos.filter(x => x.length < p.length - 1 && x !== p.slice(0, -1)).join(",") || "", r.api, String(!r.cluster), r.kind])])); return 0;
     case "config": return kConfig(pos, f);
     case "auth": return kAuth(pos, f, ns);
-    case "wait": aviso("(simulador) «kubectl wait» no está. Usa «kubectl rollout status» o «kubectl get … -w» (aquí: vuelve a mirar o «sleep 10»)."); return 1;
+    case "wait": return kWait(pos, f, ns);
+    case "api-versions": out(["admissionregistration.k8s.io/v1","apiextensions.k8s.io/v1","apps/v1","authentication.k8s.io/v1","authorization.k8s.io/v1","autoscaling/v1","autoscaling/v2","batch/v1","certificates.k8s.io/v1","coordination.k8s.io/v1","discovery.k8s.io/v1","events.k8s.io/v1","flowcontrol.apiserver.k8s.io/v1","networking.k8s.io/v1","node.k8s.io/v1","policy/v1","rbac.authorization.k8s.io/v1","scheduling.k8s.io/v1","storage.k8s.io/v1","v1","vpcresources.k8s.aws/v1beta1"].join("\n")); return 0;
+    case "wait-viejo": aviso("(simulador) «kubectl wait» no está. Usa «kubectl rollout status» o «kubectl get … -w» (aquí: vuelve a mirar o «sleep 10»)."); return 1;
     case "debug": return kDebug(pos, f, ns, tras);
-    case "attach": case "cp": case "kustomize": case "proxy": case "certificate": case "plugin": case "completion": case "diff":
+    case "proxy": return kProxy(f);
+    case "attach": return kAttach(pos, f, ns);
+    case "cp": return kCp(pos, f, ns);
+    case "diff": return kDiff(pos, f, ns);
+    case "kustomize": case "certificate": case "plugin": case "completion":
       aviso(`(simulador) «kubectl ${verbo}» no está disponible aquí. En tu cluster real sí.`); return 1;
     default: err(`error: unknown command "${verbo}" for "kubectl"\n\nDid you mean this?\n\t${VERBOS.find(v => v.startsWith(verbo.slice(0, 2))) || "get"}`); return 1;
   }
+}
+/* --dry-run: se ejecuta sobre una COPIA del cluster, se enseña lo que habría pasado y se descarta */
+function clonarEstado(o, vistos = new Map()){
+  if (o === null || typeof o !== "object") return o;
+  if (vistos.has(o)) return vistos.get(o);
+  const c = Array.isArray(o) ? [] : Object.create(Object.getPrototypeOf(o));
+  vistos.set(o, c);
+  for (const k of Reflect.ownKeys(o)){
+    if (Array.isArray(o) && k === "length") continue;
+    const d = Object.getOwnPropertyDescriptor(o, k);
+    if ("value" in d) d.value = clonarEstado(d.value, vistos);
+    Object.defineProperty(c, k, d);
+  }
+  return c;
+}
+const VERBOS_HECHO = /\b(created|configured|patched|scaled|labeled|annotated|deleted|tainted|untainted|cordoned|uncordoned|drained|autoscaled|exposed|restarted|rolled back|unchanged|image updated|env updated|resource requirements updated|selector updated|evicted)\b(?!.*\(dry run\))/;
+function enSeco(a, f){
+  const formato = f.o || f.output;
+  const limpio = [];                                     // los mismos argumentos, sin --dry-run ni -o
+  for (let i = 0; i < a.length; i++){
+    const x = a[i];
+    if (/^--dry-run(=.*)?$/.test(x)) continue;
+    if (x === "-o" || x === "--output"){ i++; continue; }
+    if (/^-o\S+$/.test(x) || /^--output=/.test(x)) continue;
+    limpio.push(x);
+  }
+  const real = S, modoReal = MODO;
+  const clave = o => `${o.kind}/${o.metadata.namespace || ""}/${o.metadata.name}`;
+  const antes = new Map(real.objs.map(o => [clave(o), JSON.stringify(o)]));
+  const podsAntes = new Set(real.pods.map(p => p.ns + "/" + p.name));
+  const ant = CAPTURA; const salida = []; CAPTURA = salida;
+  let codigo = 1, copiaS = null;
+  try { S = clonarEstado(real); codigo = kubectl(limpio); }
+  finally { CAPTURA = ant; copiaS = S; S = real; MODO = modoReal; }
+  if (codigo !== 0) return codigo;                       // los errores ya salieron por pantalla
+  const marca = t => t.split("\n").map(z => z.replace(VERBOS_HECHO, "$1 (dry run)")).join("\n");
+  if (formato === "yaml" || formato === "json"){
+    const cambiados = copiaS.objs.filter(o => antes.get(clave(o)) !== JSON.stringify(o));
+    const podsNuevos = copiaS.pods.filter(p => !podsAntes.has(p.ns + "/" + p.name) && !p.efimero && !cambiados.some(o => o.kind === "Pod" && o.metadata.name === p.name));
+    const lista = cambiados.map(o => o.kind === "Pod" ? copia(o) : aObjeto(o.kind, o)).concat(podsNuevos.map(p => aObjetoPod(p)));
+    for (const o of lista){ delete o.status; if (o.metadata) delete o.metadata.uid; }
+    if (!lista.length){ for (const l of salida) out(marca(l)); return 0; }
+    const uno = lista.length === 1 ? lista[0] : {apiVersion:"v1", kind:"List", items:lista};
+    out(formato === "json" ? JSON.stringify(uno, null, 2) : yamlDump(uno).replace(/\n$/, ""));
+    return 0;
+  }
+  for (const l of salida) out(marca(l));
+  return 0;
 }
 function ayudaVerbo(v){
   const A = {
@@ -268,13 +324,14 @@ function ayudaVerbo(v){
 
 /* ---------- get ---------- */
 function kGet(pos, f, ns){
+  if (f.raw) return getRaw(f.raw === true ? pos[0] : f.raw);
   if (!pos.length){ err("You must specify the type of resource to get. Use \"kubectl api-resources\" for a complete list of supported resources."); return 1; }
   const tipos = pos[0].includes("/") ? [pos[0]] : pos[0].split(",");
   if (tipos.length > 1 || pos[0] === "all"){
     const lista = pos[0] === "all" ? ["pods","services","daemonsets","deployments","replicasets","jobs","cronjobs","horizontalpodautoscalers"] : tipos;
     let alguno = false;
     for (const t of lista){
-      const r = recurso(t); if (!r) continue;
+      const r = recurso(t); if (!r){ if (OTROS_RECURSOS.some(x => x.p === t || x.a.includes(t))) continue; err(`error: the server doesn't have a resource type "${t}"`); return 1; }
       const items = filtrar(r, listaObjetos(r.kind, ns, f.A), f); if (!items.length) continue;
       if (alguno) out("");
       alguno = true; pintarTabla(r, items, f, true);
@@ -283,7 +340,7 @@ function kGet(pos, f, ns){
     return 0;
   }
   const {r, tok, nombre: n1, resto} = tipoNombre(pos);
-  if (!r){ err(`error: the server doesn't have a resource type "${tok}"`); return 1; }
+  if (!r){ const v = otroRecurso(tok, f, ns); if (v !== null) return v; err(`error: the server doesn't have a resource type "${tok}"`); return 1; }
   if (r.kind === "Event") return kEventos(f, ns);
   if (!r.cluster && !f.A && !compruebaNs(ns)) return 1;
   let items = listaObjetos(r.kind, ns, f.A || r.cluster);
@@ -387,6 +444,7 @@ function lineasLog(p){
 }
 function kLogs(pos, f, ns){
   if (!compruebaNs(ns)) return 1;
+  if (!pos[0] && (f.l || f.selector)) return logsPorSelector(f, ns);
   const p = podObjetivo(pos[0], ns);
   if (!pos[0]){ err("error: expected 'logs [-f] [-p] (POD | TYPE/NAME) [-c CONTAINER]'."); return 1; }
   if (!p){ err(`Error from server (NotFound): pods "${pos[0]}" not found`); pistaNs(ns); return 1; }
@@ -432,6 +490,8 @@ function plantillaBasica(nombre, imagen, cmd, extras){
 function kCreate(pos, f, ns, tras){
   if (f.f) return kApply(pos, f, ns, true);
   const sub = pos[0], nombre = pos[1];
+  if (sub === "service" || sub === "svc") return crearService(pos, f, ns);
+  if (sub === "token") return crearToken(nombre, f, ns);
   const listaEsp = ["deployment","deploy","configmap","cm","secret","namespace","ns","job","cronjob","cj","serviceaccount","sa","role","rolebinding","clusterrole","clusterrolebinding","quota","resourcequota","service","svc","poddisruptionbudget","pdb"];
   if (!sub || !listaEsp.includes(sub)){ err(`error: must specify one of -f and -k\n\n(o un subcomando: ${listaEsp.filter((_, i) => i % 2 === 0).join(", ")})`); return 1; }
   if (sub === "namespace" || sub === "ns"){
@@ -1035,11 +1095,27 @@ function kLabel(pos, f, ns){
   return 0;
 }
 function kAnnotate(pos, f, ns){
-  const {r, nombre, resto} = tipoNombre(pos);
-  if (!r || r.kind !== "Deployment"){ aviso("(simulador) annotate solo está para deployment"); return 1; }
-  const {d} = deploymentObjetivo(pos, ns); if (!d) return 1;
-  const a = Object.assign({}, d.metadata.annotations); if (!cambiosEtiquetas(a, resto, Object.assign({}, f, {overwrite:true}))) return 1;
-  d.metadata.annotations = a; out(`deployment.apps/${nombre} annotated`); return 0;
+  const {r, tok, nombre, resto} = tipoNombre(pos);
+  if (!r){ err(`error: the server doesn't have a resource type "${tok || ""}"`); return 1; }
+  if (!nombre){ err("error: one or more resources must be specified as <resource> <name> or <resource>/<name>"); return 1; }
+  if (!(resto || []).length){ err("error: at least one annotation update is required"); return 1; }
+  const g = Object.assign({}, f, {overwrite:f.overwrite || r.kind === "Deployment"});
+  if (r.kind === "Pod"){
+    const p = S.pods.find(x => x.ns === ns && x.name === nombre && !x.efimero); if (!p){ noExiste(r, nombre); pistaNs(ns); return 1; }
+    const a = Object.assign({}, p.annotations); if (!cambiosEtiquetas(a, resto, g)) return 1; p.annotations = a;
+    const o = obj("Pod", ns, nombre); if (o) o.metadata.annotations = Object.assign({}, a);
+  } else if (r.kind === "Node"){
+    const n = S.nodes.find(x => x.name === nombre); if (!n){ noExiste(r, nombre); return 1; }
+    const a = Object.assign({}, n.anot || {}); if (!cambiosEtiquetas(a, resto, g)) return 1; n.anot = a;
+  } else if (r.kind === "Namespace"){
+    if (!S.ns[nombre]){ noExiste(r, nombre); return 1; }
+    const a = Object.assign({}, S.ns[nombre].annotations || {}); if (!cambiosEtiquetas(a, resto, g)) return 1; S.ns[nombre].annotations = a;
+  } else {
+    const o = r.cluster ? S.objs.find(x => x.kind === r.kind && x.metadata.name === nombre) : obj(r.kind, ns, nombre);
+    if (!o){ noExiste(r, nombre); pistaNs(ns); return 1; }
+    const a = Object.assign({}, o.metadata.annotations); if (!cambiosEtiquetas(a, resto, g)) return 1; o.metadata.annotations = a;
+  }
+  out(`${r.kind === "Service" ? "service" : r.plural.replace(/ies$/, "y").replace(/s$/, "")}${r.api.includes("/") ? "." + r.api.split("/")[0] : ""}/${nombre} annotated`); return 0;
 }
 function kTaint(pos, f){
   const r = recurso(pos[0] || "");
@@ -1168,6 +1244,7 @@ function kExec(pos, f, ns, tras){
   if (p.noPods){ err(`error: no se encuentran Pods de ${p.t}/${p.n}`); return 1; }
   if (!tras.length){ err(`error: you must specify at least one command for the container\n   (ej: kubectl exec ${p.name} -n ${ns} -- env   ·   shell: kubectl exec -it ${p.name} -n ${ns} -- sh)`); return 1; }
   if (p.estado !== "Running"){ err(`error: unable to upgrade connection: container not found ("${p.spec.containers[0].name}")   — el Pod está en ${p.estado}`); return 1; }
+  if (f.c && f.c !== true && !p.spec.containers.some(c => c.name === f.c)){ err(`error: container ${f.c} not found in pod ${p.name}`); nota(`   (contenedores: ${p.spec.containers.map(c => c.name).join(", ")})`); return 1; }
   const perf = perfil(p.spec.containers[0]);
   if (perf.tipo === "generico" || perf.tipo === "sistema"){
     err(`error: Internal error occurred: error executing command in container: failed to exec in container: OCI runtime exec failed: exec failed: unable to start container process: exec: "${tras[0]}": executable file not found in $PATH: unknown`);
@@ -1349,9 +1426,247 @@ function kExplain(pos){
   const k = String(pos[0] || "").toLowerCase().replace(/^deploy\./, "deployment.").replace(/^deployments\./, "deployment.").replace(/^svc\./, "service.").replace(/^services\./, "service.").replace(/^po\./, "pod.").replace(/^pods\./, "pod.").replace(/^hpa/, "horizontalpodautoscaler").replace(/^pdb/, "poddisruptionbudget").replace(/^cm$/, "configmap").replace(/^netpol/, "networkpolicy").replace(/^quota/, "resourcequota");
   const base = k.replace(/s$/, "");
   const txt = EXPLICA[k] || EXPLICA[base] || EXPLICA[k.replace(/^deployment\.spec\.template\.spec\./, "pod.spec.")];
+  if (!txt && pos[0]){ const e = explicarEsquema(k); if (e && e.txt){ out(e.txt); return 0; } if (e && e.error){ err(e.error); return 1; } }
   if (!txt){ if (!pos[0]){ err("error: You must specify the type of resource to explain. Use \"kubectl api-resources\" for a complete list of supported resources."); return 1; } aviso(`(simulador) sin explicación para «${pos[0]}». Prueba: deployment, deployment.spec.replicas, service.spec.ports, pod.spec.containers.resources, pod.spec.tolerations, cronjob.spec.schedule, networkpolicy, role…`); return 1; }
   out(txt); return 0;
 }
+/* ---------- kubectl explain: esquema de los campos más usados (para rutas que no tienen texto propio) ---------- */
+const ESQ_PROBE = {_t:"Probe", _d:"Comprobación periódica del contenedor: httpGet, tcpSocket o exec.",
+  httpGet:{_t:"HTTPGetAction", _d:"Petición HTTP GET. Éxito si responde 200-399.", path:{_t:"string", _d:"Ruta a pedir, p. ej. /."}, port:{_t:"IntOrString", _d:"Puerto del CONTENEDOR (número o nombre)."}, scheme:{_t:"string", _d:"HTTP (por defecto) o HTTPS."}},
+  tcpSocket:{_t:"TCPSocketAction", _d:"Éxito si se puede abrir una conexión TCP.", port:{_t:"IntOrString", _d:"Puerto del contenedor."}},
+  exec:{_t:"ExecAction", _d:"Ejecuta un comando dentro del contenedor; éxito si sale con 0.", command:{_t:"[]string", _d:"El comando y sus argumentos."}},
+  initialDelaySeconds:{_t:"integer", _d:"Segundos de espera tras arrancar antes de la primera prueba."}, periodSeconds:{_t:"integer", _d:"Cada cuántos segundos se prueba (10 por defecto)."},
+  timeoutSeconds:{_t:"integer", _d:"Segundos para responder (1 por defecto)."}, failureThreshold:{_t:"integer", _d:"Fallos seguidos para darlo por fallido (3 por defecto)."}, successThreshold:{_t:"integer", _d:"Éxitos seguidos para darlo por bueno (1)."}};
+const ESQ_CONT = {_t:"[]Container", _d:"Los contenedores del Pod. Cada uno es una imagen con su comando, puertos, variables, recursos y sondas.",
+  name:{_t:"string", _d:"Nombre del contenedor (único en el Pod). Es el que usan set image, logs -c, exec -c."}, image:{_t:"string", _d:"Imagen: repositorio:tag."},
+  imagePullPolicy:{_t:"string", _d:"Always, IfNotPresent o Never."}, command:{_t:"[]string", _d:"Sustituye el ENTRYPOINT de la imagen."}, args:{_t:"[]string", _d:"Sustituye el CMD de la imagen (argumentos del command)."},
+  workingDir:{_t:"string", _d:"Directorio de trabajo."}, ports:{_t:"[]ContainerPort", _d:"Puertos que expone (informativo).", containerPort:{_t:"integer", _d:"Puerto en el que escucha el contenedor."}, name:{_t:"string", _d:"Nombre del puerto (lo puede usar un targetPort)."}, protocol:{_t:"string", _d:"TCP (por defecto), UDP o SCTP."}},
+  env:{_t:"[]EnvVar", _d:"Variables de entorno.", name:{_t:"string", _d:"Nombre de la variable."}, value:{_t:"string", _d:"Valor literal."}, valueFrom:{_t:"EnvVarSource", _d:"Valor sacado de un ConfigMap (configMapKeyRef), un Secret (secretKeyRef) o del propio Pod (fieldRef)."}},
+  envFrom:{_t:"[]EnvFromSource", _d:"Carga TODAS las claves de un ConfigMap (configMapRef) o Secret (secretRef) como variables."},
+  resources:{_t:"ResourceRequirements", _d:"requests: lo que se reserva para planificar. limits: el máximo (memoria: OOMKilled; CPU: throttling).", requests:{_t:"map[string]Quantity", _d:"cpu (100m = 0,1 CPU), memory (64Mi)…"}, limits:{_t:"map[string]Quantity", _d:"cpu, memory…"}},
+  livenessProbe:ESQ_PROBE, readinessProbe:ESQ_PROBE, startupProbe:ESQ_PROBE,
+  volumeMounts:{_t:"[]VolumeMount", _d:"Dónde se montan los volúmenes del Pod.", name:{_t:"string", _d:"Nombre del volumen (de spec.volumes)."}, mountPath:{_t:"string", _d:"Ruta dentro del contenedor."}, readOnly:{_t:"boolean", _d:"Solo lectura."}},
+  securityContext:{_t:"SecurityContext", _d:"Seguridad del contenedor.", runAsUser:{_t:"integer", _d:"UID con el que corre."}, runAsNonRoot:{_t:"boolean", _d:"Si es true, no arranca como root."}, allowPrivilegeEscalation:{_t:"boolean", _d:"false = ningún proceso puede ganar privilegios (NoNewPrivs)."},
+    privileged:{_t:"boolean", _d:"Acceso casi total al nodo. Nunca en producción."}, readOnlyRootFilesystem:{_t:"boolean", _d:"Sistema de ficheros raíz de solo lectura."}, capabilities:{_t:"Capabilities", _d:"add / drop de capabilities de Linux (drop: [\"ALL\"])."}, seccompProfile:{_t:"SeccompProfile", _d:"type: RuntimeDefault (recomendado), Localhost o Unconfined."}}};
+const ESQ_PODSPEC = {_t:"PodSpec", _d:"Qué corre el Pod y cómo.", containers:ESQ_CONT, initContainers:Object.assign({}, ESQ_CONT, {_t:"[]Container", _d:"Contenedores que se ejecutan EN ORDEN antes de los normales; cada uno debe terminar bien."}),
+  volumes:{_t:"[]Volume", _d:"Volúmenes del Pod: configMap, secret, emptyDir, persistentVolumeClaim…"}, restartPolicy:{_t:"string", _d:"Always (por defecto), OnFailure o Never."},
+  nodeSelector:{_t:"map[string]string", _d:"Solo nodos que tengan TODAS estas labels."}, tolerations:{_t:"[]Toleration", _d:"Permiten ir a nodos con taints (key, operator, value, effect)."}, affinity:{_t:"Affinity", _d:"Reglas de afinidad con nodos y con otros Pods."},
+  serviceAccountName:{_t:"string", _d:"La ServiceAccount (identidad) del Pod."}, automountServiceAccountToken:{_t:"boolean", _d:"Si se monta el token de la ServiceAccount en el Pod."},
+  securityContext:{_t:"PodSecurityContext", _d:"Seguridad para todos los contenedores: runAsUser, runAsNonRoot, fsGroup, seccompProfile."}, shareProcessNamespace:{_t:"boolean", _d:"Todos los contenedores ven los procesos de todos."},
+  terminationGracePeriodSeconds:{_t:"integer", _d:"Segundos que se espera al parar (30 por defecto)."}, priorityClassName:{_t:"string", _d:"Prioridad del Pod."}, hostNetwork:{_t:"boolean", _d:"Usa la red del nodo."}};
+const ESQ_META = {_t:"ObjectMeta", _d:"Nombre, namespace, labels y annotations.", name:{_t:"string", _d:"Nombre (único por tipo y namespace)."}, namespace:{_t:"string", _d:"Namespace."}, labels:{_t:"map[string]string", _d:"Etiquetas: las usan los selectores."}, annotations:{_t:"map[string]string", _d:"Notas para herramientas; no sirven para seleccionar."}};
+const ESQUEMA = {
+  pod:{_k:"Pod", _v:"v1", metadata:ESQ_META, spec:ESQ_PODSPEC, status:{_t:"PodStatus", _d:"Lo que HAY: phase, conditions, podIP, containerStatuses, qosClass. Lo escribe Kubernetes."}},
+  deployment:{_k:"Deployment", _g:"apps", _v:"v1", metadata:ESQ_META, spec:{_t:"DeploymentSpec", _d:"Estado deseado.", replicas:{_t:"integer", _d:"Número de Pods (1 por defecto)."}, selector:{_t:"LabelSelector", _d:"Qué Pods son suyos; debe coincidir con template.metadata.labels."},
+    template:{_t:"PodTemplateSpec", _d:"La plantilla de los Pods.", metadata:ESQ_META, spec:ESQ_PODSPEC}, strategy:{_t:"DeploymentStrategy", _d:"RollingUpdate (maxSurge, maxUnavailable) o Recreate."}, revisionHistoryLimit:{_t:"integer", _d:"Revisiones que se guardan para rollout undo (10)."}, minReadySeconds:{_t:"integer", _d:"Segundos listo para contar como disponible."}, paused:{_t:"boolean", _d:"rollout pause."}},
+    status:{_t:"DeploymentStatus", _d:"replicas, readyReplicas, availableReplicas, updatedReplicas, conditions."}},
+  service:{_k:"Service", _v:"v1", metadata:ESQ_META, spec:{_t:"ServiceSpec", _d:"Cómo se publica.", type:{_t:"string", _d:"ClusterIP, NodePort, LoadBalancer o ExternalName."}, selector:{_t:"map[string]string", _d:"Pods LISTOS con estas labels reciben el tráfico."},
+    ports:{_t:"[]ServicePort", _d:"Puertos.", port:{_t:"integer", _d:"Puerto del Service."}, targetPort:{_t:"IntOrString", _d:"Puerto del CONTENEDOR."}, nodePort:{_t:"integer", _d:"Puerto en cada nodo (NodePort/LoadBalancer)."}, name:{_t:"string", _d:"Nombre del puerto."}, protocol:{_t:"string", _d:"TCP, UDP o SCTP."}},
+    clusterIP:{_t:"string", _d:"IP interna (None = headless)."}}},
+  daemonset:{_k:"DaemonSet", _g:"apps", _v:"v1", metadata:ESQ_META, spec:{_t:"DaemonSetSpec", _d:"Un Pod en cada nodo (que encaje).", selector:{_t:"LabelSelector", _d:"Sus Pods."}, template:{_t:"PodTemplateSpec", _d:"Plantilla.", spec:ESQ_PODSPEC}, updateStrategy:{_t:"DaemonSetUpdateStrategy", _d:"RollingUpdate u OnDelete."}}},
+  job:{_k:"Job", _g:"batch", _v:"v1", metadata:ESQ_META, spec:{_t:"JobSpec", _d:"Ejecutar hasta terminar.", completions:{_t:"integer", _d:"Éxitos necesarios."}, parallelism:{_t:"integer", _d:"Pods a la vez."}, backoffLimit:{_t:"integer", _d:"Reintentos antes de fallar (6)."}, activeDeadlineSeconds:{_t:"integer", _d:"Tiempo máximo."}, ttlSecondsAfterFinished:{_t:"integer", _d:"Borrado automático al acabar."}, template:{_t:"PodTemplateSpec", _d:"Plantilla (restartPolicy Never u OnFailure).", spec:ESQ_PODSPEC}}},
+  cronjob:{_k:"CronJob", _g:"batch", _v:"v1", metadata:ESQ_META, spec:{_t:"CronJobSpec", _d:"Job programado.", schedule:{_t:"string", _d:"minuto hora día mes día-semana."}, suspend:{_t:"boolean", _d:"Pausarlo."}, concurrencyPolicy:{_t:"string", _d:"Allow, Forbid o Replace."}, jobTemplate:{_t:"JobTemplateSpec", _d:"El Job que se crea."}, successfulJobsHistoryLimit:{_t:"integer", _d:"Jobs buenos que se guardan (3)."}}},
+  namespace:{_k:"Namespace", _v:"v1", metadata:ESQ_META, spec:{_t:"NamespaceSpec", _d:"finalizers."}},
+  node:{_k:"Node", _v:"v1", metadata:ESQ_META, spec:{_t:"NodeSpec", _d:"providerID, podCIDR, taints, unschedulable (cordon).", taints:{_t:"[]Taint", _d:"key, value, effect (NoSchedule, PreferNoSchedule, NoExecute)."}, unschedulable:{_t:"boolean", _d:"true = cordon."}, providerID:{_t:"string", _d:"aws:///<zona>/<id de instancia>."}},
+    status:{_t:"NodeStatus", _d:"capacity, allocatable, conditions (Ready…), addresses, nodeInfo."}},
+  serviceaccount:{_k:"ServiceAccount", _v:"v1", metadata:ESQ_META, automountServiceAccountToken:{_t:"boolean", _d:"Si sus Pods montan el token (se decide al crear cada Pod)."}, imagePullSecrets:{_t:"[]LocalObjectReference", _d:"Secrets para descargar imágenes privadas."}},
+  clusterrole:{_k:"ClusterRole", _g:"rbac.authorization.k8s.io", _v:"v1", metadata:ESQ_META, rules:{_t:"[]PolicyRule", _d:"apiGroups, resources, verbs (como un Role, pero sin namespace)."}},
+  clusterrolebinding:{_k:"ClusterRoleBinding", _g:"rbac.authorization.k8s.io", _v:"v1", metadata:ESQ_META, roleRef:{_t:"RoleRef", _d:"El ClusterRole que se da."}, subjects:{_t:"[]Subject", _d:"A quién: User, Group o ServiceAccount (con namespace). Vale en todo el cluster."}},
+  replicaset:{_k:"ReplicaSet", _g:"apps", _v:"v1", metadata:ESQ_META, spec:{_t:"ReplicaSetSpec", _d:"Lo crea un Deployment (uno por versión).", replicas:{_t:"integer", _d:"Pods."}, selector:{_t:"LabelSelector", _d:"Sus Pods."}, template:{_t:"PodTemplateSpec", _d:"Plantilla.", spec:ESQ_PODSPEC}}},
+};
+const ALIAS_EXPLAIN = {po:"pod", pods:"pod", deploy:"deployment", deployments:"deployment", svc:"service", services:"service", ds:"daemonset", daemonsets:"daemonset", jobs:"job", cj:"cronjob", cronjobs:"cronjob", ns:"namespace", namespaces:"namespace",
+  no:"node", nodes:"node", sa:"serviceaccount", serviceaccounts:"serviceaccount", clusterroles:"clusterrole", clusterrolebindings:"clusterrolebinding", rs:"replicaset", replicasets:"replicaset"};
+function explicarEsquema(ruta){
+  const partes = ruta.split(".").filter(Boolean); if (!partes.length) return null;
+  const raiz = ALIAS_EXPLAIN[partes[0]] || partes[0]; const tipo = ESQUEMA[raiz]; if (!tipo) return null;
+  let nodo = tipo, nombre = raiz;
+  for (const p of partes.slice(1)){
+    const k = Object.keys(nodo).find(z => !z.startsWith("_") && z.toLowerCase() === p.toLowerCase());
+    if (!k) return {error:`error: field "${p}" does not exist`};
+    nodo = nodo[k]; nombre = k;
+  }
+  const cab = `KIND:       ${tipo._k}\n${tipo._g ? `GROUP:      ${tipo._g}\n` : ""}VERSION:    ${tipo._v}\n\n`;
+  const hijos = Object.keys(nodo).filter(z => !z.startsWith("_"));
+  const campos = hijos.length ? "\n\nFIELDS:\n" + hijos.map(h => `  ${h}\t<${nodo[h]._t || "Object"}>\n    ${nodo[h]._d || ""}`).join("\n\n") : "";
+  if (partes.length === 1) return {txt:cab + `DESCRIPTION:\n    ${(EXPLICA[raiz] || "").split("DESCRIPTION:\n")[1] ? EXPLICA[raiz].split("DESCRIPTION:\n")[1].split("\n\n")[0].trim() : tipo._k}` + campos};
+  return {txt:cab + `FIELD: ${nombre} <${nodo._t || "Object"}>\n\nDESCRIPTION:\n    ${nodo._d || ""}` + campos};
+}
+
+/* ---------- kubectl wait ---------- */
+function kWait(pos, f, ns){
+  if (!compruebaNs(ns)) return 1;
+  const cond = String(f.for || "");
+  if (!cond){ err("error: --for must be specified: --for=condition=Ready, --for=condition=Available, --for=condition=Complete o --for=delete"); return 1; }
+  const tiempo = (() => { const m = String(f.timeout || "30s").match(/^(\d+)(s|m)?$/); return m ? parseInt(m[1], 10) * (m[2] === "m" ? 60 : 1) : 30; })();
+  // objetivos: «pod/x», «pod x y», «pods -l app=x», «deployment/x»…
+  let tipo = null, nombres = [];
+  for (const p of pos){ if (p.includes("/")){ const [t, n] = p.split("/"); tipo = tipo || t; nombres.push(n); } else if (!tipo) tipo = p; else nombres.push(p); }
+  const r = tipo && recurso(tipo);
+  if (!r){ err(`error: the server doesn't have a resource type "${tipo || ""}"`); return 1; }
+  const sel = f.l || f.selector;
+  const lista = () => {
+    if (r.kind === "Pod"){ const ps = S.pods.filter(p => p.ns === ns && !p.efimero && (f.all || (sel ? selectorLabels(sel)(p.labels) : nombres.includes(p.name)))); return ps.map(p => ({id:`pod/${p.name}`, o:p})); }
+    const os = objs(r.kind, ns).filter(o => f.all || (sel ? selectorLabels(sel)(o.metadata.labels || {}) : nombres.includes(o.metadata.name)));
+    return os.map(o => ({id:`${r.plural.replace(/s$/, "")}${r.api.includes("/") ? "." + r.api.split("/")[0] : ""}/${o.metadata.name}`, o}));
+  };
+  const inicial = lista();
+  if (!inicial.length){ if (cond === "delete"){ return 0; } err(sel ? `error: no matching resources found` : `Error from server (NotFound): ${r.plural} "${nombres[0] || ""}" not found`); return 1; }
+  const cumple = it => {
+    const c = cond.toLowerCase();
+    if (c === "delete") return !lista().some(z => z.id === it.id);
+    const o = it.o;
+    if (r.kind === "Pod"){ if (c === "condition=ready") return !!o.listo; if (c === "condition=podscheduled") return !!o.node; if (c === "condition=initialized") return !(o.spec.initContainers || []).length || !!o.initHecho; if (c === "condition=containersready") return !!o.listo; }
+    if (r.kind === "Deployment" && c === "condition=available"){ const e = estadoDeployment(o); return (e.availableReplicas || 0) >= (o.spec.replicas ?? 1); }
+    if (r.kind === "Job" && c === "condition=complete") return !!((o.status || {}).succeeded >= ((o.spec || {}).completions || 1));
+    if (r.kind === "Job" && c === "condition=failed") return !!(o.status || {}).failed && (o.status.failed > ((o.spec || {}).backoffLimit ?? 6));
+    return null;
+  };
+  if (cumple(inicial[0]) === null){ err(`error: (simulador) condición no reconocida «${cond}» para ${r.plural}. Prueba: condition=Ready (pods), condition=Available (deployments), condition=Complete (jobs), delete`); return 1; }
+  let pendientes = inicial.slice();
+  for (let t = 0; t <= tiempo && pendientes.length; t++){
+    const vivos = lista(); pendientes = pendientes.map(p => vivos.find(v => v.id === p.id) || (cond === "delete" ? p : null)).filter(Boolean);
+    for (const p of pendientes.slice()) if (cumple(p)){ out(`${p.id} condition met`); pendientes = pendientes.filter(z => z !== p); }
+    if (pendientes.length && t < tiempo){ avanzarReloj(1); reconciliar(); }
+  }
+  if (pendientes.length){ for (const p of pendientes) err(`error: timed out waiting for the condition on ${p.id.split("/")[0]}s/${p.id.split("/")[1]}`); return 1; }
+  return 0;
+}
+
+/* ---------- kubectl logs -l (varios Pods por selector) ---------- */
+function logsPorSelector(f, ns){
+  const sel = f.l || f.selector;
+  const ps = S.pods.filter(p => p.ns === ns && !p.efimero && !p.borrando && selectorLabels(sel)(p.labels)).sort((a, b) => a.name.localeCompare(b.name));
+  if (!ps.length){ out(`No resources found in ${ns} namespace.`); return 0; }
+  const max = parseInt(f["max-log-requests"] || "5", 10);
+  if (ps.length > max){ err(`error: you are attempting to follow ${ps.length} log streams, but maximum allowed concurrency is ${max}, use --max-log-requests to increase the limit`); return 1; }
+  const g = Object.assign({}, f); delete g.l; delete g.selector;
+  let codigo = 0;
+  for (const p of ps){
+    if (f.prefix){ const ant = CAPTURA; const buf = []; CAPTURA = buf; try { codigo = kLogs([p.name], g, ns) || codigo; } finally { CAPTURA = ant; }
+      const c = g.c || p.spec.containers[0].name; for (const l of buf.join("\n").split("\n")) if (l) out(`[pod/${p.name}/${c}] ${l}`); }
+    else codigo = kLogs([p.name], g, ns) || codigo;
+  }
+  return codigo;
+}
+
+/* ---------- kubectl create service clusterip|nodeport|loadbalancer <nombre> --tcp=puerto:targetPort ---------- */
+function crearService(pos, f, ns){
+  if (!compruebaNs(ns)) return 1;
+  const tipos = {clusterip:"ClusterIP", nodeport:"NodePort", loadbalancer:"LoadBalancer"};
+  const tipo = tipos[String(pos[1] || "").toLowerCase()], nombre = pos[2];
+  if (!tipo){ err(`error: must specify one of: clusterip, nodeport, loadbalancer\n   (ej: kubectl create service clusterip web --tcp=80:8080 -n <ns>)`); return 1; }
+  if (!nombre){ err("error: exactly one NAME is required, got 0"); return 1; }
+  const tcp = [].concat(f.tcp || []).flatMap(x => String(x).split(",")).filter(Boolean);
+  if (!tcp.length){ err("error: at least one tcp port specifier must be provided"); return 1; }
+  if (obj("Service", ns, nombre)){ err(`error: failed to create ${tipo === "ClusterIP" ? "ClusterIP" : tipo} service: services "${nombre}" already exists`); return 1; }
+  const ports = [];
+  for (const t of tcp){ const m = t.match(/^(\d+)(?::(\w+))?$/); if (!m){ err(`error: invalid port "${t}"`); return 1; } ports.push({name:`${m[1]}-${m[2] || m[1]}`, port:parseInt(m[1], 10), protocol:"TCP", targetPort:/^\d+$/.test(m[2] || m[1]) ? parseInt(m[2] || m[1], 10) : m[2]}); }
+  guardarObj({apiVersion:"v1", kind:"Service", metadata:metaNueva(nombre, ns, {labels:{app:nombre}}), spec:{type:tipo, selector:{app:nombre}, ports}});
+  out(`service/${nombre} created`);
+  nota(`(el selector es app=${nombre}: solo recibe tráfico si hay Pods con esa label. Si no, cámbialo con kubectl set selector)`);
+  return 0;
+}
+
+/* ---------- tipos que existen en un EKS real aunque el juego no los use: salen vacíos o con lo que trae EKS ---------- */
+const OTROS_RECURSOS = [
+  {p:"persistentvolumes", a:["pv","persistentvolume"], ns:false},
+  {p:"persistentvolumeclaims", a:["pvc","persistentvolumeclaim"], ns:true},
+  {p:"statefulsets", a:["sts","statefulset","statefulsets.apps"], ns:true},
+  {p:"ingresses", a:["ing","ingress","ingresses.networking.k8s.io"], ns:true},
+  {p:"ingressclasses", a:["ingressclass"], ns:false},
+  {p:"limitranges", a:["limits","limitrange"], ns:true},
+  {p:"certificatesigningrequests", a:["csr","certificatesigningrequest"], ns:false},
+  {p:"volumeattachments", a:["volumeattachment"], ns:false},
+  {p:"replicationcontrollers", a:["rc","replicationcontroller"], ns:true},
+  {p:"podtemplates", a:["podtemplate"], ns:true},
+  {p:"csidrivers", a:["csidriver"], ns:false, filas:[["NAME","ATTACHREQUIRED","PODINFOONMOUNT","STORAGECAPACITY","TOKENREQUESTS","REQUIRESREPUBLISH","MODES","AGE"],["efs.csi.aws.com","false","false","false","<unset>","false","Persistent","1d"]]},
+  {p:"storageclasses", a:["sc","storageclass","storageclasses.storage.k8s.io"], ns:false, filas:[["NAME","PROVISIONER","RECLAIMPOLICY","VOLUMEBINDINGMODE","ALLOWVOLUMEEXPANSION","AGE"],["gp2","kubernetes.io/aws-ebs","Delete","WaitForFirstConsumer","false","1d"]]},
+  {p:"priorityclasses", a:["pc","priorityclass"], ns:false, filas:[["NAME","VALUE","GLOBAL-DEFAULT","AGE","PREEMPTIONPOLICY"],["system-cluster-critical","2000000000","false","1d","PreemptLowerPriority"],["system-node-critical","2000001000","false","1d","PreemptLowerPriority"]]},
+  {p:"customresourcedefinitions", a:["crd","crds","customresourcedefinition"], ns:false, filas:[["NAME","CREATED AT"],["cninodes.vpcresources.k8s.aws","2026-11-26T09:00:00Z"],["eniconfigs.crd.k8s.amazonaws.com","2026-11-26T09:00:00Z"],["policyendpoints.networking.k8s.aws","2026-11-26T09:00:00Z"],["securitygrouppolicies.vpcresources.k8s.aws","2026-11-26T09:00:00Z"]]},
+  {p:"mutatingwebhookconfigurations", a:["mutatingwebhookconfiguration"], ns:false, filas:[["NAME","WEBHOOKS","AGE"],["pod-identity-webhook","1","1d"],["vpc-resource-mutating-webhook","1","1d"]]},
+  {p:"validatingwebhookconfigurations", a:["validatingwebhookconfiguration"], ns:false, filas:[["NAME","WEBHOOKS","AGE"],["vpc-resource-validating-webhook","2","1d"]]},
+  {p:"apiservices", a:["apiservice"], ns:false, filas:[["NAME","SERVICE","AVAILABLE","AGE"],["v1.","Local","True","1d"],["v1.apps","Local","True","1d"],["v1.batch","Local","True","1d"],["v1.rbac.authorization.k8s.io","Local","True","1d"],["v1beta1.metrics.k8s.io","kube-system/metrics-server","True","1d"]]},
+  {p:"componentstatuses", a:["cs","componentstatus"], ns:false, aviso:"Warning: v1 ComponentStatus is deprecated in v1.19+", filas:[["NAME","STATUS","MESSAGE","ERROR"],["etcd-0","Healthy","ok",""],["scheduler","Healthy","ok",""],["controller-manager","Healthy","ok",""]]},
+  {p:"leases", a:["lease","leases.coordination.k8s.io"], ns:true, filasNs:ns => ns === "kube-node-lease" ? [["NAME","HOLDER","AGE"], ...S.nodes.map(n => [n.name, n.name, "1d"])] : null},
+];
+function otroRecurso(tok, f, ns){
+  const t = String(tok || "").toLowerCase(); const r = OTROS_RECURSOS.find(x => x.p === t || x.a.includes(t)); if (!r) return null;
+  if (r.ns && !f.A && !compruebaNs(ns)) return 1;
+  if (r.aviso) aviso(r.aviso);
+  const filas = r.filasNs ? r.filasNs(ns) : r.filas;
+  if (filas && filas.length > 1){ out(tabla(f["no-headers"] ? filas.slice(1) : filas)); return 0; }
+  out(r.ns && !f.A ? `No resources found in ${ns} namespace.` : "No resources found");
+  return 0;
+}
+function getRaw(ruta){
+  const r = String(ruta || "");
+  if (/^\/(healthz|readyz|livez)(\?.*)?$/.test(r)){ out("ok"); return 0; }
+  if (r === "/version"){ out(JSON.stringify({major:"1", minor:K8S_MINOR.split(".")[1] + "+", gitVersion:K8S_VER, platform:"linux/amd64"}, null, 2)); return 0; }
+  if (/^\/(readyz|livez)\?verbose/.test(r) || r === "/readyz?verbose"){ out("[+]ping ok\n[+]etcd ok\nreadyz check passed"); return 0; }
+  if (r === "/api" || r === "/api/"){ out(JSON.stringify({kind:"APIVersions", versions:["v1"]})); return 0; }
+  err(`Error from server (NotFound): the server could not find the requested resource`); return 1;
+}
+function crearToken(sa, f, ns){
+  if (!compruebaNs(ns)) return 1;
+  if (!sa){ err("error: exactly one NAME is required, got 0"); return 1; }
+  if (!obj("ServiceAccount", ns, sa)){ err(`Error from server (NotFound): serviceaccounts "${sa}" not found`); return 1; }
+  const seg = (() => { const m = String(f.duration || "1h").match(/^(\d+)(h|m|s)$/); return m ? parseInt(m[1], 10) * ({h:3600, m:60, s:1})[m[2]] : 3600; })();
+  const ahoraS = Math.floor(Date.now() / 1000);
+  const b = o => b64e(JSON.stringify(o)).replace(/=+$/, "").replace(/\+/g, "-").replace(/\//g, "_");
+  out(`${b({alg:"RS256", kid:"7f3a9"})}.${b({aud:["https://kubernetes.default.svc"], exp:ahoraS + seg, iat:ahoraS, iss:`https://oidc.eks.${REGION}.amazonaws.com/id/0A1B2C3D4E5F60718293A4B5C6D7E8F9`, sub:`system:serviceaccount:${ns}:${sa}`})}.c2ltdWxhZG8tbm8tdmFsaWRv`);
+  return 0;
+}
+function kProxy(f){
+  out(`Starting to serve on 127.0.0.1:${f.port || 8001}`);
+  nota("(simulador) en el navegador no se abre ningún puerto. En tu PC, con el proxy abierto: curl http://127.0.0.1:8001/api/v1/namespaces/default/pods  · Ctrl+C para pararlo");
+  return 0;
+}
+function kAttach(pos, f, ns){
+  const p = podObjetivo(pos[0], ns, true);
+  if (!p || p.noPods){ err(`Error from server (NotFound): pods "${pos[0] || ""}" not found`); return 1; }
+  if (p.estado !== "Running"){ err(`error: unable to upgrade connection: container not found ("${p.spec.containers[0].name}") — el Pod está en ${p.estado}`); return 1; }
+  out("If you don't see a command prompt, try pressing enter.");
+  const c = kLogs([p.name], Object.assign({}, f, {tail:"5", f:undefined, follow:undefined}), ns);
+  nota("(simulador) attach te conecta a la salida del proceso principal; en el real se queda escuchando hasta Ctrl+C");
+  return c;
+}
+function kCp(pos, f, ns){
+  const [orig, dest] = pos;
+  if (!orig || !dest){ err("error: source and destination are required"); return 1; }
+  const m = orig.match(/^(?:([^/:]+)\/)?([^:]+):(.+)$/);
+  if (!m){ aviso("(simulador) en el navegador no hay disco local, así que no se puede SUBIR un fichero al Pod. Para escribir dentro: kubectl exec -it <pod> -- sh"); return 1; }
+  const nsCp = m[1] || ns, pod = m[2], ruta = m[3];
+  const ant = CAPTURA; const buf = []; CAPTURA = buf; let c;
+  try { c = kExec([pod], {}, nsCp, ["cat", ruta]); } finally { CAPTURA = ant; }
+  if (c !== 0){ err(`error: ${ruta}: No such file or directory (o el contenedor no trae «tar»)`); return 1; }
+  nota(`(simulador) copiado «${ruta}» → ${dest} (${buf.join("\n").length} bytes). En el navegador no hay disco: para verlo, kubectl exec ${pod} -- cat ${ruta}`);
+  return 0;
+}
+function kDiff(pos, f, ns){
+  if (!f.f){ err("error: must specify one of -f and -k"); return 1; }
+  if (!f.n && !S.defNs && JUEGO.nivelNs()) ns = JUEGO.nivelNs();
+  abrirEditor(plantillaApply(ns), texto => {
+    let docs; try { docs = yamlParseTodos(texto); } catch(e){ err(`error: error parsing STDIN: error converting YAML to JSON: yaml: ${e.message}`); return; }
+    let hay = false;
+    for (const d of docs){
+      if (!d || !d.kind || !d.metadata) continue;
+      const nsD = d.metadata.namespace || (typeof f.n === "string" ? f.n : ns);
+      const previo = existente(d.kind, (recursoPorKind(d.kind) || {}).cluster ? undefined : nsD, d.metadata.name);
+      const limpia = o => { const c = copia(o); delete c.status; if (c.metadata){ for (const k of ["uid","creationTimestamp","resourceVersion","generation","managedFields"]) delete c.metadata[k]; if (c.metadata.annotations && !Object.keys(c.metadata.annotations).length) delete c.metadata.annotations; if (c.metadata.labels && !Object.keys(c.metadata.labels).length) delete c.metadata.labels; } return yamlDump(c).replace(/\n$/, "").split("\n"); };
+      const a = previo ? limpia(aObjeto(d.kind, previo)) : [], b = limpia(Object.assign({}, d, {metadata:Object.assign({namespace:nsD}, d.metadata)}));
+      const sa = new Set(a), sb = new Set(b);
+      const menos = a.filter(l => !sb.has(l)), mas = b.filter(l => !sa.has(l));
+      if (!menos.length && !mas.length) continue;
+      hay = true;
+      out(`diff -u -N /tmp/LIVE/${d.kind.toLowerCase()}.${d.metadata.name} /tmp/MERGED/${d.kind.toLowerCase()}.${d.metadata.name}`);
+      for (const l of menos) out("-" + l, "c-err");
+      for (const l of mas) out("+" + l, "c-ok");
+    }
+    if (!hay) nota("(sin diferencias: apply no cambiaría nada)");
+  }, "kubectl diff -f -  (pega el YAML que quieres comparar con lo que hay)");
+  return 0;
+}
+
 function kConfig(pos, f){
   const sub = pos[0];
   const ctx = `arn:aws:eks:${REGION}:${CUENTA}:cluster/${CLUSTER}`;
@@ -1433,7 +1748,14 @@ function aws(a){
       return salida({update:{id:uid(), status:"InProgress", type:"ConfigUpdate", params:Object.entries(v).map(([k, x]) => ({type:k.charAt(0).toUpperCase() + k.slice(1), value:String(x)})), createdAt:new Date().toISOString(), errors:[]}});
     }
     if (op === "update-kubeconfig"){ if (!clusterOk()) return 1; out(`Updated context ${f.alias || `arn:aws:eks:${REGION}:${CUENTA}:cluster/${CLUSTER}`} in ~/.kube/config`); return 0; }
-    if (op === "list-addons"){ if (!clusterOk()) return 1; return salida({addons:["eks-pod-identity-agent","metrics-server"]}); }
+    const ADDONS = {"coredns":"v1.14.7-eksbuild.35", "eks-pod-identity-agent":"v1.5.0-eksbuild.3", "kube-proxy":"v1.36.0-eksbuild.65", "metrics-server":"v0.9.1-eksbuild.2", "vpc-cni":"v1.23.3-eksbuild.2"};
+    if (op === "list-addons"){ if (!clusterOk()) return 1; return salida({addons:Object.keys(ADDONS)}); }
+    if (op === "describe-addon"){
+      if (!clusterOk()) return 1;
+      const nom = f["addon-name"]; if (!nom || nom === true){ err("aws: error: the following arguments are required: --addon-name"); return 1; }
+      if (!ADDONS[nom]){ err(`An error occurred (ResourceNotFoundException) when calling the DescribeAddon operation: No addon: ${nom} found in cluster: ${CLUSTER}`); return 1; }
+      return salida({addon:{addonName:nom, clusterName:CLUSTER, status:"ACTIVE", addonVersion:ADDONS[nom], health:{issues:[]}, addonArn:`arn:aws:eks:${REGION}:${CUENTA}:addon/${CLUSTER}/${nom}/0a1b2c3d`, createdAt:new Date(Date.now() - 86400000).toISOString(), tags:{}}});
+    }
     S.podIdentity = S.podIdentity || [];
     if (op === "create-pod-identity-association"){
       if (!clusterOk()) return 1;
@@ -1478,6 +1800,30 @@ function aws(a){
       MODO = {tipo:"nodo", id:n.id, sesion, prompt:"sh-5.2$ "}; JUEGO.cambioPrompt(); return 0;
     }
     if (op === "send-command"){ out(JSON.stringify({Command:{CommandId:uid(), DocumentName:f["document-name"] || "AWS-RunShellScript", Status:"Pending"}}, null, 4)); nota("(simulador) el comando no se ejecuta de verdad; para hacer cosas en un nodo usa aws ssm start-session --target <i-…>"); return 0; }
+  }
+  if (serv === "iam"){
+    const ROLES = [
+      {RoleName:"AWSServiceRoleForAmazonEKS", Path:"/aws-service-role/eks.amazonaws.com/"},
+      {RoleName:"AWSServiceRoleForAmazonEKSNodegroup", Path:"/aws-service-role/eks-nodegroup.amazonaws.com/"},
+      {RoleName:"eks-juego-cluster-role", Path:"/"}, {RoleName:"eks-juego-node-role", Path:"/"}, {RoleName:"eks-quest-s3-subidor", Path:"/"}];
+    const rol = x => Object.assign({}, x, {RoleId:"AROA" + hash(x.RoleName).toString(36).toUpperCase().padEnd(17, "X").slice(0, 17), Arn:`arn:aws:iam::${CUENTA}:role${x.Path}${x.RoleName}`, CreateDate:"2026-11-26T09:00:00+00:00"});
+    if (op === "list-roles") return salida({Roles:ROLES.slice(0, parseInt(f["max-items"] || "100", 10)).map(rol)});
+    if (op === "get-role"){ const x = ROLES.find(z => z.RoleName === f["role-name"]); if (!x){ err(`An error occurred (NoSuchEntity) when calling the GetRole operation: The role with name ${f["role-name"] || ""} cannot be found.`); return 1; }
+      const conf = x.RoleName === "eks-quest-s3-subidor" ? {Service:"pods.eks.amazonaws.com"} : x.RoleName.includes("node") ? {Service:"ec2.amazonaws.com"} : {Service:"eks.amazonaws.com"};
+      return salida({Role:Object.assign(rol(x), {AssumeRolePolicyDocument:{Version:"2012-10-17", Statement:[{Effect:"Allow", Principal:conf, Action:conf.Service.startsWith("pods") ? ["sts:AssumeRole","sts:TagSession"] : "sts:AssumeRole"}]}})}); }
+    if (op === "list-attached-role-policies"){ const n = f["role-name"]; const pol = {"eks-juego-node-role":["AmazonEKSWorkerNodePolicy","AmazonEKS_CNI_Policy","AmazonEC2ContainerRegistryReadOnly","AmazonSSMManagedInstanceCore"], "eks-juego-cluster-role":["AmazonEKSClusterPolicy"], "eks-quest-s3-subidor":["AmazonS3FullAccess"]}[n];
+      if (!pol){ err(`An error occurred (NoSuchEntity) when calling the ListAttachedRolePolicies operation: The role with name ${n || ""} cannot be found.`); return 1; }
+      return salida({AttachedPolicies:pol.map(x => ({PolicyName:x, PolicyArn:`arn:aws:iam::aws:policy/${x}`}))}); }
+  }
+  if (serv === "configure"){
+    if (op === "list"){ out(`      Name                    Value             Type    Location
+      ----                    -----             ----    --------
+   profile              laboratorio           manual    --profile
+access_key     ****************WXYZ              sso    
+secret_key     ****************abcd              sso    
+    region                eu-west-1      config-file    ~/.aws/config`); return 0; }
+    if (op === "get"){ const k = pos[2]; if (k === "region"){ out(REGION); return 0; } if (k === "output"){ out("json"); return 0; } return 1; }
+    if (op === "list-profiles"){ out("laboratorio"); return 0; }
   }
   err(`(simulador) «aws ${serv} ${op || ""}» no está disponible. Hay: sts get-caller-identity · eks … · ec2 describe-instances|terminate-instances · ssm start-session`); return 1;
 }
