@@ -14,7 +14,7 @@ It goes from *"what is a Pod?"* to looking **inside** containers: PID 1, cgroups
 
 | Option | How |
 |---|---|
-| **Just the file** | Download [`eks-quest.html`](eks-quest.html) and open it in any modern browser. Works offline. |
+| **Just the file** | Open [`eks-quest.html`](eks-quest.html), click GitHub's **Download raw file** button (⬇), then double-click the downloaded file. Any modern browser; works offline. Or clone the repo and open it from there. |
 | **Docker** | `docker build -f docker/Dockerfile -t eks-quest:3.0 .` then `docker run -d -p 8080:8080 --read-only --tmpfs /tmp eks-quest:3.0` and open http://localhost:8080 |
 
 You don't need an AWS account, a cluster, `kubectl` or `kind`: the cluster is simulated. Your progress is saved in your browser (`localStorage`) and never leaves it — the page makes no network requests at all.
