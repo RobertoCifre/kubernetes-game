@@ -18,7 +18,7 @@ Empieza en *«¿cómo se llama este Pod?»* y llega a mirar **por dentro** los c
 |---|---|
 | **Online** | Entra en **https://robertocifre.github.io/cluster-en-llamas/**: no hay que instalar nada. |
 | **Solo el fichero** | Descarga [`cluster-en-llamas.html`](https://github.com/RobertoCifre/cluster-en-llamas/releases/latest/download/cluster-en-llamas.html) de la última versión y ábrelo con doble clic. Vale cualquier navegador moderno y funciona sin Internet. |
-| **Docker** | `docker build -f docker/Dockerfile -t cluster-en-llamas:3.6 .` y después `docker run -d -p 8080:8080 --read-only --tmpfs /tmp cluster-en-llamas:3.6`; abre http://localhost:8080 |
+| **Docker** | `docker build -f docker/Dockerfile -t cluster-en-llamas:3.7 .` y después `docker run -d -p 8080:8080 --read-only --tmpfs /tmp cluster-en-llamas:3.7`; abre http://localhost:8080 |
 
 No necesitas cuenta de AWS, ni cluster, ni `kubectl`, ni `kind`: el cluster es simulado.
 
@@ -70,12 +70,16 @@ Es un simulador, no un cluster real. Entiende los comandos y opciones que necesi
 ```bash
 python construir.py               # Python 3; genera cluster-en-llamas.html
 node tests/niveles.test.js        # juega los 76 niveles con su solución
+node tests/soluciones.test.js     # la solución que ve el jugador funciona copiada tal cual
 node tests/trampas.test.js        # los «arreglos» tramposos o incorrectos NO deben valer
 node tests/chuletas.test.js       # las chuletas tienen los comandos de todos los niveles
+node tests/tuberias.test.js       # las tuberías (grep, head, awk, sed…) dan lo mismo que en Linux
+node tests/shell.test.js          # la shell dentro de un Pod (variables, tuberías, for, if…) como en busybox
+node tests/comandos-chuletas.test.js  # todos los comandos de las chuletas funcionan en el simulador
 node tests/simulacro.test.js      # ~12.000 comandos reales de kubectl y aws en todos los niveles: sin errores ni «no soportado»
 ```
 
-Las cuatro pruebas se ejecutan solas en GitHub en cada cambio (la insignia de arriba).
+Las ocho pruebas se ejecutan solas en GitHub en cada cambio (la insignia de arriba).
 
 | Ruta | Contenido |
 |---|---|

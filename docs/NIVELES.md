@@ -402,8 +402,9 @@ Los seis primeros niveles solo piden **mirar**: aprender a leer el cluster con `
 - **Solución:**
   ```bash
   kubectl expose deployment escaparate --type=LoadBalancer --port=80 -n nivel-30
-  kubectl get svc -n nivel-30 -w     # esperar EXTERNAL-IP
-  curl http://<hostname>
+  sleep 10                           # en el juego: el balanceador tarda (en AWS, 2-4 min)
+  kubectl get svc escaparate -n nivel-30     # EXTERNAL-IP ya no es <pending>
+  curl http://<EXTERNAL-IP>
   ```
 - **Pistas:**
   1. `kubectl expose … --type=LoadBalancer`.
@@ -1126,7 +1127,11 @@ Inspirado en las tareas más conocidas de las prácticas públicas de la CKA (no
      kubectl patch deployment front-end -n nivel-76 --type=json -p '[{"op":"add","path":"/spec/template/spec/containers/0/ports","value":[{"name":"http","containerPort":80,"protocol":"TCP"}]}]'
      kubectl expose deployment front-end --name=front-end-svc --port=80 --target-port=http --type=NodePort -n nivel-76
      ```
-  5. **Sidecar:** `kubectl edit deployment legacy-app -n nivel-76` y añade:
+  5. **Sidecar:** en una línea,
+     ```bash
+     kubectl patch deployment legacy-app -n nivel-76 --type=json -p '[{"op":"add","path":"/spec/template/spec/containers/-","value":{"name":"sidecar","image":"busybox:1.37","command":["/bin/sh","-c","tail -n+1 -f /var/log/legacy-app.log"],"volumeMounts":[{"name":"logs","mountPath":"/var/log"}]}}]'
+     ```
+     o con `kubectl edit deployment legacy-app -n nivel-76`, añadiendo a `containers:`:
      ```yaml
      - name: sidecar
        image: busybox:1.37
@@ -1136,5 +1141,5 @@ Inspirado en las tareas más conocidas de las prácticas públicas de la CKA (no
          mountPath: /var/log
      ```
      Comprobación: `kubectl logs deploy/legacy-app -c sidecar -n nivel-76`.
-  6. **Nodo caído:** `kubectl get nodes` → `kubectl debug node/<nodo> -it --image=busybox:1.37` (o `aws ssm start-session`) → `systemctl status kubelet` → `systemctl start kubelet`. Esperar sin hacer nada no lo arregla.
+  6. **Nodo caído:** `kubectl get nodes` → `kubectl debug node/<nodo-NotReady> -it --image=busybox:1.37` (o `aws ssm start-session`) → `systemctl status kubelet` → `systemctl start kubelet`. Esperar sin hacer nada no lo arregla.
 - **Aprendes:** el examen es práctico y por tareas: lee bien el namespace de cada una, compruébala (get, describe, `auth can-i`, logs) y no te atasques: pasa a la siguiente.

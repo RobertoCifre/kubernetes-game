@@ -25,9 +25,17 @@ jobs:
           cmp cluster-en-llamas.html /tmp/committed.html
       - name: All levels can be solved
         run: node tests/niveles.test.js
+      - name: The solution shown to the player works when copied
+        run: node tests/soluciones.test.js
       - name: Wrong or tricky fixes do not pass
         run: node tests/trampas.test.js
       - name: Cheat sheets cover every level
         run: node tests/chuletas.test.js
+      - name: Pipes behave like Linux (grep, head, tail, awk, sed, cut…)
+        run: node tests/tuberias.test.js
+      - name: The shell inside a Pod behaves like busybox
+        run: node tests/shell.test.js
+      - name: Every command in the cheat sheets works
+        run: node tests/comandos-chuletas.test.js
       - name: Command drill (~12,000 commands)
         run: node tests/simulacro.test.js

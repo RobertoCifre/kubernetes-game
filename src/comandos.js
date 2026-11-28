@@ -109,8 +109,10 @@ function ejecutarLinea(linea){
   }
   reconciliar();
 }
+let ECHO_SIN_SALTO = false;      // «echo -n … | base64»: sin el salto de línea final
 function ejecutarTuberia(texto){
   const etapas = partirFuera(texto, "|");
+  ECHO_SIN_SALTO = /^\s*echo\s+-n\b/.test(etapas[0] || "");
   if (etapas.length === 1) return ejecutarComando(etapas[0]);
   CAPTURA = [];
   let codigo = 0;
@@ -130,33 +132,107 @@ function filtro(etapa, lineas){
   const [prog, ...args] = a;
   switch (prog){
     case "grep": {
-      let inv = false, ic = false, cuenta = false, ext = false; const resto = [];
-      for (const x of args){ if (/^-[ivcE]+$/.test(x)){ inv = inv || x.includes("v"); ic = ic || x.includes("i"); cuenta = cuenta || x.includes("c"); ext = ext || x.includes("E"); } else resto.push(x); }
-      const patron = resto[0]; if (patron === undefined){ err("Usage: grep [OPTION]... PATTERNS [FILE]..."); return null; }
-      let re; try { re = new RegExp(ext ? patron : patron.replace(/[.*+?^${}()|[\]\\]/g, m => m === "." || m === "*" || m === "^" || m === "$" ? m : "\\" + m), ic ? "i" : ""); } catch(e){ re = new RegExp(patron.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), ic ? "i" : ""); }
-      const r = lineas.filter(l => re.test(l) !== inv);
-      return cuenta ? [String(r.length)] : r;
+      let inv = false, ic = false, cuenta = false, ext = false, num = false, pal = false, solo = false, antes = 0, despues = 0; const pats = [], resto = [];
+      for (let k = 0; k < args.length; k++){
+        const x = args[k]; let m;
+        if ((m = x.match(/^-([ABC])(\d*)$/))){ const v = parseInt(m[2] || args[++k], 10) || 0; if (m[1] !== "B") despues = v; if (m[1] !== "A") antes = v; continue; }
+        if (x === "-e" && args[k + 1] !== undefined){ pats.push(args[++k]); continue; }
+        if (/^--(after|before)-context=\d+$/.test(x)){ const v = parseInt(x.split("=")[1], 10); if (x.includes("after")) despues = v; else antes = v; continue; }
+        if (/^-[ivcEnwoFh]+$/.test(x)){ inv = inv || x.includes("v"); ic = ic || x.includes("i"); cuenta = cuenta || x.includes("c"); ext = ext || x.includes("E"); num = num || x.includes("n"); pal = pal || x.includes("w"); solo = solo || x.includes("o"); continue; }
+        resto.push(x);
+      }
+      if (!pats.length && resto.length) pats.push(resto[0]);
+      if (!pats.length){ err("Usage: grep [OPTION]... PATTERNS [FILE]..."); return null; }
+      const aRe = patron => { let fuente = ext ? patron : patron.replace(/[.*+?^${}()|[\]\\]/g, c => c === "." || c === "*" || c === "^" || c === "$" ? c : "\\" + c);
+        if (pal) fuente = `(?:^|[^\\w])(${fuente})(?=[^\\w]|$)`;
+        try { return new RegExp(fuente, ic ? "gi" : "g"); } catch(e){ return new RegExp(patron.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), ic ? "gi" : "g"); } };
+      const res = pats.map(aRe);
+      const casa = l => res.some(re => { re.lastIndex = 0; return re.test(l); }) !== inv;
+      const idx = []; lineas.forEach((l, k) => { if (casa(l)) idx.push(k); });
+      if (cuenta) return [String(idx.length)];
+      if (solo && !inv){ const r = []; for (const k of idx) for (const re of res){ re.lastIndex = 0; let mm; while ((mm = re.exec(lineas[k]))){ r.push((num ? (k + 1) + ":" : "") + (pal ? mm[1] : mm[0])); if (!mm[0]) re.lastIndex++; } } return r; }
+      if (!antes && !despues) return idx.map(k => (num ? (k + 1) + ":" : "") + lineas[k]);
+      const r = []; let ultimo = -2;
+      for (const k of idx){
+        const ini = Math.max(0, k - antes), fin = Math.min(lineas.length - 1, k + despues);
+        if (ultimo >= 0 && ini > ultimo + 1) r.push("--");
+        for (let z = Math.max(ini, ultimo + 1); z <= fin; z++) r.push((num ? (z + 1) + (idx.includes(z) ? ":" : "-") : "") + lineas[z]);
+        ultimo = Math.max(ultimo, fin);
+      }
+      return r;
     }
     case "wc": if (args.includes("-l")) return [String(lineas.length)]; return [`${lineas.length} ${lineas.join(" ").split(/\s+/).filter(Boolean).length} ${lineas.join("\n").length}`];
-    case "head": { const n = args[0] === "-n" ? parseInt(args[1], 10) : args[0] && /^-\d+$/.test(args[0]) ? -parseInt(args[0], 10) : 10; return lineas.slice(0, n); }
-    case "tail": { const n = args[0] === "-n" ? parseInt(args[1], 10) : args[0] && /^-\d+$/.test(args[0]) ? -parseInt(args[0], 10) : 10; return lineas.slice(-n); }
+    case "head": case "tail": {
+      // -n N · -nN · -N · -n +N (tail: desde la línea N) · -c no
+      let n = 10, desde = null;
+      for (let k = 0; k < args.length; k++){
+        const x = args[k]; let m;
+        if (x === "-n" && args[k + 1] !== undefined){ const v = args[++k]; if (/^\+\d+$/.test(v)) desde = parseInt(v.slice(1), 10); else n = parseInt(v, 10); continue; }
+        if ((m = x.match(/^-n(\+?)(\d+)$/))){ if (m[1]) desde = parseInt(m[2], 10); else n = parseInt(m[2], 10); continue; }
+        if ((m = x.match(/^--lines=(\+?)(\d+)$/))){ if (m[1]) desde = parseInt(m[2], 10); else n = parseInt(m[2], 10); continue; }
+        if ((m = x.match(/^-(\d+)$/))){ n = parseInt(m[1], 10); continue; }
+        if (x === "-f" || x === "-F"){ continue; }
+      }
+      if (isNaN(n)){ err(`${prog}: invalid number of lines`); return null; }
+      if (prog === "head") return lineas.slice(0, Math.max(0, n));
+      if (desde !== null) return lineas.slice(Math.max(0, desde - 1));
+      return n === 0 ? [] : lineas.slice(-n);
+    }
     case "sort": { const r = lineas.slice().sort(); return args.includes("-r") ? r.reverse() : r; }
     case "uniq": { const r = []; for (const l of lineas) if (r[r.length - 1] !== l) r.push(l); return args.includes("-c") ? r.map(l => `      ${lineas.filter(x => x === l).length} ${l}`) : r; }
     case "base64": {
       const texto = lineas.join("\n");
       if (args.includes("-d") || args.includes("--decode")){ const r = b64d(texto); if (r === null){ err("base64: invalid input"); return null; } return r.split("\n"); }
-      return [b64e(texto + (lineas.length ? "\n" : ""))];
+      return [b64e(texto + (lineas.length && !ECHO_SIN_SALTO ? "\n" : ""))];
     }
     case "awk": {
-      const m = (args[0] || "").match(/\{\s*print\s+([^}]*)\}/);
-      if (!m){ err("(simulador) awk: solo se admite '{print $N}'"); return null; }
-      const campos = m[1].split(",").map(x => x.trim());
-      return lineas.map(l => { const c = l.trim().split(/\s+/); return campos.map(x => x === "$0" ? l : /^\$\d+$/.test(x) ? (c[parseInt(x.slice(1), 10) - 1] || "") : x.replace(/"/g, "")).join(" "); });
+      // admite: [-F sep] 'COND {print …}'  ·  COND = NR>1, NR==2, /patrón/, !/patrón/, $3=="Running", $3!="x", NF>0
+      let sep = null, prog_ = null;
+      for (let k = 0; k < args.length; k++){ const x = args[k];
+        if (x === "-F" && args[k + 1] !== undefined){ sep = args[++k]; continue; }
+        if (/^-F./.test(x)){ sep = x.slice(2); continue; }
+        if (prog_ === null) prog_ = x; }
+      const m = String(prog_ || "").trim().match(/^(.*?)\s*(?:\{\s*print\s*([^}]*)\})?\s*$/s);
+      const cond = (m[1] || "").trim(), qué = m[2] === undefined ? (cond ? "$0" : null) : (m[2].trim() || "$0");
+      if (qué === null){ err("(simulador) awk: se admite 'COND {print $N, $M}' (COND: NR>1, /patrón/, $3==\"Running\", NF>0)"); return null; }
+      const trozos = l => sep === null ? l.trim().split(/\s+/) : l.split(sep === "\\t" ? "\t" : sep);
+      const val = (c, l, nr, tok) => { tok = tok.trim();
+        if (tok === "$0") return l; if (tok === "NR") return String(nr); if (tok === "NF") return String(c.length);
+        if (/^\$NF$/.test(tok)) return c[c.length - 1] || ""; if (/^\$\d+$/.test(tok)) return c[parseInt(tok.slice(1), 10) - 1] ?? "";
+        const q = tok.match(/^"(.*)"$/); return q ? q[1] : tok; };
+      const cumple = (c, l, nr) => {
+        if (!cond) return true;
+        let mm;
+        if ((mm = cond.match(/^(!?)\/(.*)\/$/))){ let re; try { re = new RegExp(mm[2]); } catch(e){ re = new RegExp(mm[2].replace(/[.*+?^${}()|[\]\\]/g, "\\$&")); } return re.test(l) !== !!mm[1]; }
+        if ((mm = cond.match(/^(NR|NF|\$\d+|\$NF)\s*(==|!=|>=|<=|>|<)\s*("?)(.*?)\3$/))){
+          const a = val(c, l, nr, mm[1]), b = mm[4]; const num = !mm[3] && /^-?\d+(\.\d+)?$/.test(b) && /^-?\d+(\.\d+)?$/.test(a);
+          const A_ = num ? parseFloat(a) : a, B_ = num ? parseFloat(b) : b;
+          return {"==":A_ === B_, "!=":A_ !== B_, ">":A_ > B_, "<":A_ < B_, ">=":A_ >= B_, "<=":A_ <= B_}[mm[2]];
+        }
+        return true;
+      };
+      const campos = qué.split(",").map(x => x.trim());
+      const res = []; lineas.forEach((l, k) => { const c = trozos(l); if (cumple(c, l, k + 1)) res.push(campos.map(t => val(c, l, k + 1, t)).join(" ")); });
+      return res;
     }
-    case "cut": { const d = (args.find(x => x.startsWith("-d")) || "-d\t").slice(2) || "\t"; const fi = parseInt((args.find(x => x.startsWith("-f")) || "-f1").slice(2), 10); return lineas.map(l => l.split(d)[fi - 1] || ""); }
+    case "cut": {
+      const da = args.find(x => x.startsWith("-d")); let d = da ? da.slice(2) : "\t"; if (da === "-d") d = args[args.indexOf("-d") + 1] || "\t";
+      const fa = args.find(x => x.startsWith("-f")); let fs_ = fa ? fa.slice(2) : ""; if (fa === "-f") fs_ = args[args.indexOf("-f") + 1] || "1";
+      const sel = []; for (const t of String(fs_ || "1").split(",")){ const mm = t.match(/^(\d*)-(\d*)$/); if (mm){ const a = parseInt(mm[1] || "1", 10), b = mm[2] ? parseInt(mm[2], 10) : 99; for (let z = a; z <= b; z++) sel.push(z); } else sel.push(parseInt(t, 10)); }
+      return lineas.map(l => { const c = l.split(d); if (c.length === 1) return l; return sel.filter(z => z <= c.length).map(z => c[z - 1]).join(d); });
+    }
+    case "sed": {
+      // -n 'Np' · -n 'A,Bp' · 'Nd' · 's/a/b/[g]'
+      const silencio = args.includes("-n"); const expr = args.filter(x => x !== "-n" && x !== "-e")[0] || "";
+      let mm;
+      if ((mm = expr.match(/^(\d+)(?:,(\d+|\$))?p$/))){ const a = parseInt(mm[1], 10), b = mm[2] === "$" ? lineas.length : mm[2] ? parseInt(mm[2], 10) : a; const sel = lineas.slice(a - 1, b); return silencio ? sel : lineas.flatMap((l, k) => k + 1 >= a && k + 1 <= b ? [l, l] : [l]); }
+      if ((mm = expr.match(/^(\d+)(?:,(\d+|\$))?d$/))){ const a = parseInt(mm[1], 10), b = mm[2] === "$" ? lineas.length : mm[2] ? parseInt(mm[2], 10) : a; return lineas.filter((l, k) => k + 1 < a || k + 1 > b); }
+      if ((mm = expr.match(/^s(.)(.*?)\1(.*?)\1(g?)$/))){ let re; try { re = new RegExp(mm[2], mm[4] ? "g" : ""); } catch(e){ err(`sed: -e expression #1: invalid regex`); return null; } return lineas.map(l => l.replace(re, mm[3].replace(/\\\//g, "/").replace(/&/g, "$$&"))); }
+      err("(simulador) sed: se admite  -n 'Np' · -n 'A,Bp' · 'Nd' · 's/viejo/nuevo/g'"); return null;
+    }
     case "jq": { err("(simulador) jq no está disponible: usa kubectl -o jsonpath='{…}'"); return null; }
     case "less": case "more": case "cat": return lineas;
-    default: err(`${prog}: command not found (en las tuberías del simulador: grep, wc -l, head, tail, sort, uniq, base64, awk, cut)`); return null;
+    default: err(`${prog}: command not found (en las tuberías del simulador: grep, wc, head, tail, sort, uniq, base64, awk, cut, sed)`); return null;
   }
 }
 const ERRATAS = ["ectl","kubctl","kubeclt","kubect","kubetcl","kuectl","kuberctl","kubecl","kubecttl","kctl","kubectrl","kubeclt","kubeectl","kubelctl","kubect1","kubeclt"];
@@ -1379,7 +1455,8 @@ function lineaEnShell(linea){
     MODO = null; JUEGO.cambioPrompt(); return;
   }
   if (MODO.tipo === "nodo") return comandoNodo(linea);
-  const ctx = {env:Object.assign({}, MODO.debug ? {} : (MODO.pod.envSnap || {})), lineas:[], ns:MODO.ns, pod:MODO.pod.efimero ? Object.assign({}, MODO.pod) : MODO.pod, perfil:MODO.perf, hostname:MODO.pod.name, cmdPrincipal:"sh",
+  if (!MODO.envShell) MODO.envShell = Object.assign({}, MODO.debug ? {} : (MODO.pod.envSnap || {}));
+  const ctx = {env:MODO.envShell, lineas:[], ns:MODO.ns, pod:MODO.pod.efimero ? Object.assign({}, MODO.pod) : MODO.pod, perfil:MODO.perf, hostname:MODO.pod.name, cmdPrincipal:"sh",
                debug:!!MODO.debug, c:MODO.debug ? {name:"debugger", image:MODO.imagen} : (MODO.c || (MODO.pod.spec ? MODO.pod.spec.containers[0] : null)),
                objetivo:MODO.debug ? (MODO.objetivo || null) : (MODO.pod.efimero ? null : MODO.pod)};
   ctx.out = t => ctx.lineas.push(String(t));
@@ -1943,10 +2020,37 @@ function aws(a){
     if (op === "list-pod-identity-associations"){ if (!clusterOk()) return 1; return salida({associations:S.podIdentity.filter(a => !f.namespace || a.ns === f.namespace).map(a => ({clusterName:CLUSTER, namespace:a.ns, serviceAccount:a.sa, associationId:a.id}))}); }
     if (op === "describe-pod-identity-association"){ if (!clusterOk()) return 1; const a = S.podIdentity.find(x => x.id === f["association-id"]); if (!a){ err(`An error occurred (ResourceNotFoundException) when calling the DescribePodIdentityAssociation operation: No association found for id: ${f["association-id"] || ""}`); return 1; } return salida({association:{clusterName:CLUSTER, namespace:a.ns, serviceAccount:a.sa, roleArn:a.role, associationId:a.id}}); }
     if (op === "delete-pod-identity-association"){ if (!clusterOk()) return 1; const i = S.podIdentity.findIndex(x => x.id === f["association-id"]); if (i < 0){ err(`An error occurred (ResourceNotFoundException) when calling the DeletePodIdentityAssociation operation: No association found for id: ${f["association-id"] || ""}`); return 1; } const [a] = S.podIdentity.splice(i, 1); return salida({association:{namespace:a.ns, serviceAccount:a.sa, associationId:a.id}}); }
-    err(`(simulador) «aws eks ${op || ""}» no está. Disponibles: list-clusters, describe-cluster, list-nodegroups, describe-nodegroup, update-nodegroup-config, update-kubeconfig, list-addons`); return 1;
+    if (op === "describe-cluster-versions"){
+      const V = [["1.37","STANDARD_SUPPORT","2027-12-01","2028-12-01"],["1.36","STANDARD_SUPPORT","2027-08-01","2028-08-01"],["1.35","STANDARD_SUPPORT","2027-03-01","2028-03-01"],["1.34","STANDARD_SUPPORT","2026-12-01","2027-12-01"],["1.33","EXTENDED_SUPPORT","2026-07-29","2027-07-29"]];
+      return salida({clusterVersions:V.map(([v, st, fin, finExt]) => ({clusterVersion:v, clusterType:"eks", defaultPlatformVersion:`eks.${3 + (hash(v) % 9)}`, defaultVersion:v === "1.36", releaseDate:"(ejemplo)", endOfStandardSupportDate:fin, endOfExtendedSupportDate:finExt, status:st, versionStatus:st, kubernetesPatchVersion:v + ".5"}))});
+    }
+    const INSIGHTS = [
+      {id:"a1b2c3d4-0001-4000-8000-000000000001", name:"Deprecated APIs removed in Kubernetes v1.37", category:"UPGRADE_READINESS", kubernetesVersion:"1.37", insightStatus:{status:"PASSING", reason:"No deprecated API usage detected within the last 30 days."}, description:"Checks for usage of deprecated APIs that are scheduled for removal in Kubernetes v1.37."},
+      {id:"a1b2c3d4-0001-4000-8000-000000000002", name:"Kubelet version skew", category:"UPGRADE_READINESS", kubernetesVersion:"1.37", insightStatus:{status:"PASSING", reason:"Node kubelet versions match the cluster control plane version."}, description:"Checks for kubelet versions of worker nodes in the cluster to see if upgrade would cause noncompliance with supported Kubernetes kubelet version skew policy."},
+      {id:"a1b2c3d4-0001-4000-8000-000000000003", name:"Amazon Linux 2 compatibility", category:"UPGRADE_READINESS", kubernetesVersion:"1.37", insightStatus:{status:"PASSING", reason:"All nodes use Amazon Linux 2023."}, description:"Checks if any nodes in the cluster are running Amazon Linux 2."}];
+    if (op === "list-insights"){ if (!clusterOk()) return 1; const cat = f.filter && (String(f.filter).match(/categories=(\w+)/) || [])[1];
+      return salida({insights:INSIGHTS.filter(i => !cat || i.category === cat).map(i => ({id:i.id, name:i.name, category:i.category, kubernetesVersion:i.kubernetesVersion, insightStatus:i.insightStatus}))}); }
+    if (op === "describe-insight"){ if (!clusterOk()) return 1; const i = INSIGHTS.find(z => z.id === f.id); if (!i){ err(`An error occurred (ResourceNotFoundException) when calling the DescribeInsight operation: Insight ${f.id || ""} not found.`); nota("   (los ids salen en: aws eks list-insights --cluster-name eks-juego)"); return 1; }
+      return salida({insight:Object.assign({}, i, {recommendation:"No action required.", resources:[]})}); }
+    if (op === "describe-addon-versions"){
+      const nom = f["addon-name"]; const lista = Object.keys(ADDONS).filter(a => !nom || a === nom);
+      if (nom && !lista.length) return salida({addons:[]});
+      return salida({addons:lista.map(a => ({addonName:a, type:a === "metrics-server" ? "observability" : "networking", owner:"aws", addonVersions:[{addonVersion:ADDONS[a], architecture:["amd64","arm64"], compatibilities:[{clusterVersion:String(f["kubernetes-version"] || K8S_MINOR), platformVersions:["*"], defaultVersion:true}]}]}))});
+    }
+    const ADMIN_ARN = `arn:aws:iam::${CUENTA}:role/aws-reserved/sso.amazonaws.com/eu-west-1/AWSReservedSSO_Admin_0a1b2c3d4e5f6071`;
+    const NODO_ARN = `arn:aws:iam::${CUENTA}:role/eks-juego-node-role`;
+    if (op === "list-access-entries"){ if (!clusterOk()) return 1; return salida({accessEntries:[ADMIN_ARN, NODO_ARN]}); }
+    if (op === "describe-access-entry"){ if (!clusterOk()) return 1; const a = f["principal-arn"]; if (![ADMIN_ARN, NODO_ARN].includes(a)){ err(`An error occurred (ResourceNotFoundException) when calling the DescribeAccessEntry operation: The specified principalArn could not be found. You can view your available access entries with 'list-access-entries'.`); return 1; }
+      return salida({accessEntry:{clusterName:CLUSTER, principalArn:a, kubernetesGroups:a === NODO_ARN ? [] : [], type:a === NODO_ARN ? "EC2_LINUX" : "STANDARD", username:a === NODO_ARN ? "system:node:{{EC2PrivateDNSName}}" : a}}); }
+    if (op === "list-associated-access-policies"){ if (!clusterOk()) return 1; const a = f["principal-arn"];
+      if (!a || a === true){ err("aws: error: the following arguments are required: --principal-arn"); return 1; }
+      if (![ADMIN_ARN, NODO_ARN].includes(a)){ err(`An error occurred (ResourceNotFoundException) when calling the ListAssociatedAccessPolicies operation: The specified principalArn could not be found.`); nota("   (los ARN salen en: aws eks list-access-entries --cluster-name eks-juego)"); return 1; }
+      return salida({clusterName:CLUSTER, principalArn:a, associatedAccessPolicies:a === ADMIN_ARN ? [{policyArn:"arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy", accessScope:{type:"cluster", namespaces:[]}}] : []}); }
+    if (op === "list-access-policies") return salida({accessPolicies:["AmazonEKSAdminPolicy","AmazonEKSAdminViewPolicy","AmazonEKSClusterAdminPolicy","AmazonEKSEditPolicy","AmazonEKSViewPolicy"].map(n => ({name:n, arn:`arn:aws:eks::aws:cluster-access-policy/${n}`}))});
+    err(`(simulador) «aws eks ${op || ""}» no está. Disponibles: list-clusters, describe-cluster, describe-cluster-versions, list-nodegroups, describe-nodegroup, update-nodegroup-config, update-kubeconfig, list-addons, describe-addon, describe-addon-versions, list-insights, describe-insight, list-access-entries, list-access-policies, list-associated-access-policies, *-pod-identity-association`); return 1;
   }
   if (serv === "ec2"){
-    const inst = n => ({InstanceId:n.id, InstanceType:"t3.medium", State:{Code:n.terminando ? 32 : 16, Name:n.terminando ? "shutting-down" : "running"}, PrivateIpAddress:n.ip, PrivateDnsName:n.name, Placement:{AvailabilityZone:n.az}, ImageId:"ami-091cdf1e1e565fdae", LaunchTime:new Date(Date.now() - (ahora() - n.creado) * 1000).toISOString(), Tags:[{Key:"eks:nodegroup-name", Value:NG}, {Key:"eks:cluster-name", Value:CLUSTER}, {Key:"Name", Value:"eks-juego-ng-juego-Node"}, {Key:"Project", Value:"eks-juego"}]});
+    const inst = n => ({InstanceId:n.id, InstanceType:"t3.medium", State:{Code:n.terminando ? 32 : 16, Name:n.terminando ? "shutting-down" : "running"}, PrivateIpAddress:n.ip, PrivateDnsName:n.name, Placement:{AvailabilityZone:n.az}, ImageId:"ami-0a1b2c3d4e5f60005", LaunchTime:new Date(Date.now() - (ahora() - n.creado) * 1000).toISOString(), Tags:[{Key:"eks:nodegroup-name", Value:NG}, {Key:"eks:cluster-name", Value:CLUSTER}, {Key:"Name", Value:"eks-juego-ng-juego-Node"}, {Key:"Project", Value:"eks-juego"}]});
     if (op === "describe-instances"){
       let lista = S.nodes;
       if (f["instance-ids"]) { const ids = String(f["instance-ids"]).split(/[ ,]/); lista = lista.filter(n => ids.includes(n.id)); if (!lista.length){ err(`An error occurred (InvalidInstanceID.NotFound) when calling the DescribeInstances operation: The instance ID '${ids[0]}' does not exist`); return 1; } }
@@ -1960,7 +2064,12 @@ function aws(a){
         res.push({InstanceId:id, CurrentState:{Code:32, Name:"shutting-down"}, PreviousState:{Code:prev === "running" ? 16 : 32, Name:prev}}); }
       salida({TerminatingInstances:res}); nota("(el ASG del node group lanzará otra instancia para mantener desiredSize: tarda unos segundos en el juego, 2-4 min en AWS)"); reconciliar(); return 0;
     }
-    err(`(simulador) «aws ec2 ${op || ""}» no está. Disponibles: describe-instances, terminate-instances`); return 1;
+    if (op === "describe-volumes"){
+      const vols = S.nodes.map(n => ({VolumeId:"vol-0" + hash(n.id + "v").toString(16).padStart(16, "0").slice(0, 16), Size:20, State:"in-use", VolumeType:"gp3", AvailabilityZone:n.az, Attachments:[{InstanceId:n.id, Device:"/dev/xvda", State:"attached"}]}));
+      const est = f.filters && (String(f.filters).match(/Name=status,Values=(\S+)/) || [])[1];
+      return salida({Volumes:vols.filter(v => !est || est.split(",").includes(v.State))});
+    }
+    err(`(simulador) «aws ec2 ${op || ""}» no está. Disponibles: describe-instances, terminate-instances, describe-volumes`); return 1;
   }
   if (serv === "ssm"){
     if (op === "start-session"){
@@ -1971,7 +2080,22 @@ function aws(a){
       out(`\nStarting session with SessionId: ${sesion}`);
       MODO = {tipo:"nodo", id:n.id, sesion, prompt:"sh-5.2$ "}; JUEGO.cambioPrompt(); return 0;
     }
-    if (op === "send-command"){ out(JSON.stringify({Command:{CommandId:uid(), DocumentName:f["document-name"] || "AWS-RunShellScript", Status:"Pending"}}, null, 4)); nota("(simulador) el comando no se ejecuta de verdad; para hacer cosas en un nodo usa aws ssm start-session --target <i-…>"); return 0; }
+    if (op === "send-command"){
+      const ids = String(f["instance-ids"] || "").split(/[ ,]/).filter(Boolean);
+      if (!ids.length){ err("aws: error: the following arguments are required: --instance-ids"); return 1; }
+      const n = S.nodes.find(x => x.id === ids[0]); if (!n){ err(`An error occurred (InvalidInstanceId) when calling the SendCommand operation: Instances [[${ids[0]}]] not in a valid state for account ${CUENTA}`); return 1; }
+      const m = String(f.parameters || "").match(/commands=\[?"?([^"\]]*)/); const orden = m ? m[1] : "";
+      let salidaNodo = "";
+      if (orden){ const ant = CAPTURA, modoAnt = MODO; const buf = []; CAPTURA = buf; MODO = {tipo:"nodo", id:n.id, sesion:"ssm", prompt:""};
+        try { comandoNodo(orden); } catch(e){} finally { CAPTURA = ant; MODO = modoAnt; } salidaNodo = buf.join("\n"); }
+      const id = uid(); S.ssm = S.ssm || {}; S.ssm[id] = {instancia:n.id, salida:salidaNodo, orden};
+      return salida({Command:{CommandId:id, DocumentName:f["document-name"] || "AWS-RunShellScript", InstanceIds:ids, Parameters:{commands:[orden]}, Status:"Pending"}});
+    }
+    if (op === "get-command-invocation"){
+      const c = (S.ssm || {})[f["command-id"]];
+      if (!c){ err(`An error occurred (InvocationDoesNotExist) when calling the GetCommandInvocation operation: `); nota("   (el command-id sale de aws ssm send-command)"); return 1; }
+      return salida({CommandId:f["command-id"], InstanceId:c.instancia, Status:"Success", StatusDetails:"Success", ResponseCode:0, StandardOutputContent:c.salida + (c.salida ? "\n" : ""), StandardErrorContent:""});
+    }
   }
   if (serv === "iam"){
     const ROLES = [
@@ -1986,6 +2110,11 @@ function aws(a){
     if (op === "list-attached-role-policies"){ const n = f["role-name"]; const pol = {"eks-juego-node-role":["AmazonEKSWorkerNodePolicy","AmazonEKS_CNI_Policy","AmazonEC2ContainerRegistryReadOnly","AmazonSSMManagedInstanceCore"], "eks-juego-cluster-role":["AmazonEKSClusterPolicy"], "eks-quest-s3-subidor":["AmazonS3FullAccess"]}[n];
       if (!pol){ err(`An error occurred (NoSuchEntity) when calling the ListAttachedRolePolicies operation: The role with name ${n || ""} cannot be found.`); return 1; }
       return salida({AttachedPolicies:pol.map(x => ({PolicyName:x, PolicyArn:`arn:aws:iam::aws:policy/${x}`}))}); }
+  }
+  if (serv === "elbv2" && op === "describe-load-balancers"){
+    const lbs = S.objs.filter(o => o.kind === "Service" && o.spec.type === "LoadBalancer" && o.status && o.status.loadBalancer && (o.status.loadBalancer.ingress || []).length);
+    return salida({LoadBalancers:lbs.map(s => { const h = s.status.loadBalancer.ingress[0].hostname; const nom = h.split("-").slice(0, 1)[0];
+      return {LoadBalancerName:nom, DNSName:h, Type:"classic", Scheme:"internet-facing", VpcId:"vpc-0a1b2c3d4e5f60004", State:{Code:"active"}, Tags:[{Key:"kubernetes.io/service-name", Value:`${s.metadata.namespace}/${s.metadata.name}`}]}; })});
   }
   if (serv === "configure"){
     if (op === "list"){ out(`      Name                    Value             Type    Location

@@ -381,6 +381,19 @@ function partirNivelSuperior(s, seps){         // parte por ; \n respetando comi
   if (act.trim()) r.push(act.trim());
   return r;
 }
+function partirTuberiaShell(s){                // a | b | c  (sin romper «||» ni lo que va entre comillas)
+  const r = []; let act = "", q = null;
+  for (let i = 0; i < s.length; i++){
+    const c = s[i];
+    if (q){ act += c; if (c === q) q = null; continue; }
+    if (c === "'" || c === '"'){ q = c; act += c; continue; }
+    if (c === "|" && s[i + 1] === "|"){ act += "||"; i++; continue; }
+    if (c === "|"){ r.push(act.trim()); act = ""; continue; }
+    act += c;
+  }
+  r.push(act.trim());
+  return r;
+}
 function partirCadena(s){                      // a && b || c  → [{op:null,cmd:a},{op:"&&",cmd:b},…]
   const r = []; let act = "", q = null, op = null;
   for (let i = 0; i < s.length; i++){
@@ -402,22 +415,47 @@ function analizarScript(texto){
     toks.push(t);
   }
   let i = 0;
+  // «done» / «fi» pueden llevar detrás una tubería: for … done | wc -l
+  const esFin = (t, fines) => t !== undefined && fines.some(f => t === f || new RegExp("^" + f + "\\s*\\|").test(t));
+  function cierre(fin){
+    const t = toks[i];
+    if (t === fin){ i++; return null; }
+    const m = t !== undefined && t.match(new RegExp("^" + fin + "\\s*\\|\\s*(.*)$", "s"));
+    if (m){ i++; return m[1]; }
+    throw new Error("falta " + fin);
+  }
   function seq(fines){
     const nodos = [];
-    while (i < toks.length && !fines.includes(toks[i])){
+    while (i < toks.length && !esFin(toks[i], fines)){
       const t = toks[i];
       if (/^if\s/.test(t)){ const cond = t.slice(3); i++; if (toks[i] !== "then") throw new Error("se esperaba then"); i++;
-        const entonces = seq(["else","fi"]); let sino = []; if (toks[i] === "else"){ i++; sino = seq(["fi"]); } if (toks[i] !== "fi") throw new Error("falta fi"); i++;
-        nodos.push({si:cond, entonces, sino}); continue; }
+        const entonces = seq(["else","fi"]); let sino = []; if (toks[i] === "else"){ i++; sino = seq(["fi"]); }
+        const tub = cierre("fi"); nodos.push({si:cond, entonces, sino, tuberia:tub}); continue; }
       if (/^while\s/.test(t)){ const cond = t.slice(6); i++; if (toks[i] !== "do") throw new Error("se esperaba do"); i++;
-        const cuerpo = seq(["done"]); if (toks[i] !== "done") throw new Error("falta done"); i++; nodos.push({mientras:cond, cuerpo}); continue; }
+        const cuerpo = seq(["done"]); const tub = cierre("done"); nodos.push({mientras:cond, cuerpo, tuberia:tub}); continue; }
+      { const mf = t.match(/^for\s+(\w+)\s+in\s+(.*)$/s);
+        if (mf){ i++; if (toks[i] !== "do") throw new Error("se esperaba do"); i++;
+          const cuerpo = seq(["done"]); const tub = cierre("done"); nodos.push({para:mf[1], lista:mf[2], cuerpo, tuberia:tub}); continue; } }
       if (/^until\s/.test(t)){ const cond = t.slice(6); i++; if (toks[i] !== "do") throw new Error("se esperaba do"); i++;
-        const cuerpo = seq(["done"]); if (toks[i] !== "done") throw new Error("falta done"); i++; nodos.push({hasta:cond, cuerpo}); continue; }
+        const cuerpo = seq(["done"]); const tub = cierre("done"); nodos.push({hasta:cond, cuerpo, tuberia:tub}); continue; }
       nodos.push({cmd:t}); i++;
     }
     return nodos;
   }
   return seq([]);
+}
+// pasa por una tubería (| grep … | wc -l) las líneas que ha escrito un bloque
+function aplicarTuberiaShell(texto, lineas, ctx){
+  let lin = lineas; if (lin.length && lin[lin.length - 1] === "") lin = lin.slice(0, -1);
+  let cod = 0;
+  for (const e of partirTuberiaShell(texto)){
+    const prog = (e.trim().split(/\s+/)[0] || "");
+    if (!["grep","wc","head","tail","sort","uniq","awk","cut","sed","base64","cat","tr"].includes(prog)){ ctx.out(`sh: ${prog}: not found`); return 127; }
+    const r = typeof filtro === "function" ? filtro(e, lin) : lin; if (r === null) return 1;
+    cod = prog === "grep" && !/-c/.test(e) ? (r.length ? 0 : 1) : 0; lin = r;
+  }
+  if (lin.length) ctx.out(lin.join("\n"));
+  return cod;
 }
 /* ---------- lo que se ve DENTRO de un contenedor: usuario, capabilities, procesos, cgroups, token ---------- */
 const BITS_CAP = {CHOWN:0,DAC_OVERRIDE:1,DAC_READ_SEARCH:2,FOWNER:3,FSETID:4,KILL:5,SETGID:6,SETUID:7,SETPCAP:8,LINUX_IMMUTABLE:9,NET_BIND_SERVICE:10,NET_BROADCAST:11,NET_ADMIN:12,NET_RAW:13,IPC_LOCK:14,IPC_OWNER:15,SYS_MODULE:16,SYS_RAWIO:17,SYS_CHROOT:18,SYS_PTRACE:19,SYS_PACCT:20,SYS_ADMIN:21,SYS_BOOT:22,SYS_NICE:23,SYS_RESOURCE:24,SYS_TIME:25,SYS_TTY_CONFIG:26,MKNOD:27,LEASE:28,AUDIT_WRITE:29,AUDIT_CONTROL:30,SETFCAP:31};
@@ -589,6 +627,12 @@ function comandoSimple(linea, ctx){
   linea = linea.replace(/\s*(\d|&)?>\s*\/dev\/null/g, "").replace(/\s*2>&1/g, "").replace(/\s*>&2/g, "").trim();
   if (!linea) return 0;
   if (aNulo){ const sub = Object.assign({}, ctx, {out:() => {}}); const cod = comandoSimple(linea, sub); ctx.durmio = sub.durmio; if (sub.bucle) ctx.bucle = sub.bucle; return cod; }
+  { const etapas = partirTuberiaShell(linea);
+    if (etapas.length > 1){
+      const buf = []; const sub = Object.assign({}, ctx, {out:t => { for (const l of String(t).split("\n")) buf.push(l); }});
+      comandoSimple(etapas[0], sub); ctx.durmio = sub.durmio; if (sub.bucle) ctx.bucle = sub.bucle;
+      return aplicarTuberiaShell(etapas.slice(1).join(" | "), buf, ctx);
+    } }
   { const m = linea.match(/\s*(>>?)\s*(\/[^\s;|&>]+)\s*$/);
     if (m && ctx.pod && ctx.pod.spec){
       const destino = m[2], anadir = m[1] === ">>"; const resto = linea.slice(0, m.index).trim(); const salida = [];
@@ -697,6 +741,13 @@ function evaluarTest(a){
 function ejecutarNodos(nodos, ctx){
   let codigo = 0;
   for (const n of nodos){
+    if (n.tuberia){
+      const buf = []; const sub = Object.assign({}, ctx, {out:t => { for (const l of String(t).split("\n")) buf.push(l); }});
+      const solo = Object.assign({}, n); delete solo.tuberia;
+      try { ejecutarNodos([solo], sub); } finally { ctx.durmio = sub.durmio; if (sub.bucle) ctx.bucle = sub.bucle; }
+      codigo = aplicarTuberiaShell(n.tuberia, buf, ctx);
+      continue;
+    }
     if (n.cmd !== undefined){
       for (const parte of partirCadena(n.cmd)){
         if (parte.op === "&&" && codigo !== 0) continue;
@@ -707,6 +758,8 @@ function ejecutarNodos(nodos, ctx){
       const sub = Object.assign({}, ctx, {out:() => {}});
       let c = 0; for (const parte of partirCadena(n.si)){ if (parte.op === "&&" && c !== 0) continue; if (parte.op === "||" && c === 0) continue; c = comandoSimple(parte.cmd, sub); }
       codigo = ejecutarNodos(c === 0 ? n.entonces : n.sino, ctx);
+    } else if (n.para !== undefined){
+      for (const v of palabras(n.lista, ctx.env).slice(0, 200)){ ctx.env[n.para] = v; codigo = ejecutarNodos(n.cuerpo, ctx); }
     } else if (n.hasta !== undefined){
       const antes = ctx.lineas.length, escAntes = (ctx.escrituras || []).length; ctx.durmio = 0;
       let c = 0; for (const parte of partirCadena(n.hasta)){ if (parte.op === "&&" && c !== 0) continue; if (parte.op === "||" && c === 0) continue; c = comandoSimple(parte.cmd, ctx); }

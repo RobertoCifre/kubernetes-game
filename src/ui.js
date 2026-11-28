@@ -4,7 +4,7 @@
    ========================================================================== */
 "use strict";
 
-const VERSION_JUEGO = "3.6";
+const VERSION_JUEGO = "3.7";
 const CLAVE_PARTIDA = "eksquest3";
 const NUEVOS_AL_PRINCIPIO = 6;   // la v3.1 metió 6 niveles nuevos delante: los de la v2/3.0 suben 6 puestos
 let P = {hechos:{}, actual:1, pistas:{}, solucion:{}};
