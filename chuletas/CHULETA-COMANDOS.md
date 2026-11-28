@@ -451,7 +451,7 @@ kubens default                           # volver
 
 ```text
 help                 # todos los comandos que entiende el simulador
-mapa                 # los 76 niveles y cuáles llevas (se desbloquean en orden)
+mapa                 # los 76 niveles y cuáles llevas (todos abiertos: «nivel N» salta a cualquiera) (se desbloquean en orden)
 mision               # vuelve a enseñar la misión
 pista                # una pista (−20 XP)
 comprobar            # ¿lo he resuelto? (las misiones se comprueban solas)
@@ -459,7 +459,6 @@ responder 17         # niveles de pregunta
 solucion             # la solución (el nivel queda a 0 XP)
 repetir              # vuelve a montar el nivel desde cero
 siguiente · anterior · nivel 23
-experto              # abre todos los niveles (o el botón «Modo EXPERTO») · «experto off» vuelve al orden
 exportar             # copia de tu partida: fichero .json + código (o el botón 💾 Guardar)
 importar <código>    # recupera una partida guardada, también en otro navegador (o el botón 📂 Cargar)
 ```

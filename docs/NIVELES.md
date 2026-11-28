@@ -10,7 +10,7 @@
   - nodos sin cordon;
   - sin los taints ni las labels del juego (`mantenimiento`, `hardware`);
   - CoreDNS con 2 réplicas.
-- **Puntos:** 100 XP por nivel. Cada pista resta 20. Ver la solución deja el nivel en 0 XP. Repetir un nivel no suma dos veces. Máximo: 7.600 XP. Los niveles se desbloquean en orden: para jugar uno hay que haber superado el anterior (ver la solución no cuenta como superarlo).
+- **Puntos:** 100 XP por nivel. Cada pista resta 20. Ver la solución deja el nivel en 0 XP. Repetir un nivel no suma dos veces. Máximo: 7.600 XP. Todos los niveles están abiertos: se recomienda ir en orden, pero se puede saltar a cualquiera con `nivel N`.
 - **Rangos por XP:**
 
   | Rango | Desde |

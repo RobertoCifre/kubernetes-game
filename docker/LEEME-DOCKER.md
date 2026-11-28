@@ -1,4 +1,4 @@
-# Cluster en Llamas 3.5 en Docker
+# Cluster en Llamas 3.6 en Docker
 
 La imagen sirve **solo el juego del navegador**: un único HTML con los 76 niveles y las chuletas dentro.
 
@@ -13,8 +13,8 @@ Es una **simulación**: no se conecta a AWS ni a ningún cluster. No necesita cu
 Desde la carpeta raíz del proyecto:
 
 ```bash
-docker build -f docker/Dockerfile -t cluster-en-llamas:3.5 .
-docker run -d --name cluster-en-llamas -p 8080:8080 --read-only --tmpfs /tmp cluster-en-llamas:3.5
+docker build -f docker/Dockerfile -t cluster-en-llamas:3.6 .
+docker run -d --name cluster-en-llamas -p 8080:8080 --read-only --tmpfs /tmp cluster-en-llamas:3.6
 # abre http://localhost:8080
 ```
 
@@ -33,14 +33,14 @@ docker compose -f docker/docker-compose.yml down              # parar y borrar e
 |---|---|---|
 | **A. Solo el HTML** | `cluster-en-llamas.html` (≈0,45 MB) | Un navegador. Funciona sin Internet, con doble clic |
 | **B. Clonar el repositorio y construir** | `git clone` | Docker |
-| **C. Imagen exportada** | `cluster-en-llamas-3.5.tar` (`docker save`) | Docker: `docker load -i cluster-en-llamas-3.5.tar` |
+| **C. Imagen exportada** | `cluster-en-llamas-3.6.tar` (`docker save`) | Docker: `docker load -i cluster-en-llamas-3.6.tar` |
 
 Para la C, en el PC de origen:
 
 ```bash
 # imagen para Intel/AMD (amd64) y ARM (arm64: Mac con Apple Silicon, Raspberry Pi 4/5…)
-docker buildx build --platform linux/amd64,linux/arm64 -f docker/Dockerfile -t cluster-en-llamas:3.5 --load .
-docker save cluster-en-llamas:3.5 -o cluster-en-llamas-3.5.tar
+docker buildx build --platform linux/amd64,linux/arm64 -f docker/Dockerfile -t cluster-en-llamas:3.6 --load .
+docker save cluster-en-llamas:3.6 -o cluster-en-llamas-3.6.tar
 ```
 
 Exportar las dos arquitecturas en un solo `.tar` necesita el almacén de imágenes de containerd (Docker Desktop lo trae activado en las versiones recientes). Si no lo tienes, quita `--platform` y exporta solo la de tu máquina.
@@ -51,9 +51,9 @@ Exportar las dos arquitecturas en un solo `.tar` necesita el almacén de imágen
 
 ```bash
 # kind: carga la imagen local en el cluster
-kind load docker-image cluster-en-llamas:3.5
-# (en EKS: sube la imagen a ECR y usa su URI en lugar de cluster-en-llamas:3.5)
-sed 's#<IMAGEN>#cluster-en-llamas:3.5#' docker/k8s-cluster-en-llamas.yaml | kubectl apply -f -
+kind load docker-image cluster-en-llamas:3.6
+# (en EKS: sube la imagen a ECR y usa su URI en lugar de cluster-en-llamas:3.6)
+sed 's#<IMAGEN>#cluster-en-llamas:3.6#' docker/k8s-cluster-en-llamas.yaml | kubectl apply -f -
 kubectl port-forward svc/cluster-en-llamas 8080:80 -n cluster-en-llamas       # y abre http://localhost:8080
 ```
 

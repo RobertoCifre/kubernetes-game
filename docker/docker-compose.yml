@@ -6,7 +6,7 @@ services:
     build:
       context: ..
       dockerfile: docker/Dockerfile
-    image: cluster-en-llamas:3.5
+    image: cluster-en-llamas:3.6
     container_name: cluster-en-llamas
     ports:
       - "8080:8080"

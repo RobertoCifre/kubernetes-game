@@ -18,7 +18,7 @@ Empieza en *«¿cómo se llama este Pod?»* y llega a mirar **por dentro** los c
 |---|---|
 | **Online** | Entra en **https://robertocifre.github.io/cluster-en-llamas/**: no hay que instalar nada. |
 | **Solo el fichero** | Descarga [`cluster-en-llamas.html`](https://github.com/RobertoCifre/cluster-en-llamas/releases/latest/download/cluster-en-llamas.html) de la última versión y ábrelo con doble clic. Vale cualquier navegador moderno y funciona sin Internet. |
-| **Docker** | `docker build -f docker/Dockerfile -t cluster-en-llamas:3.5 .` y después `docker run -d -p 8080:8080 --read-only --tmpfs /tmp cluster-en-llamas:3.5`; abre http://localhost:8080 |
+| **Docker** | `docker build -f docker/Dockerfile -t cluster-en-llamas:3.6 .` y después `docker run -d -p 8080:8080 --read-only --tmpfs /tmp cluster-en-llamas:3.6`; abre http://localhost:8080 |
 
 No necesitas cuenta de AWS, ni cluster, ni `kubectl`, ni `kind`: el cluster es simulado.
 
@@ -43,8 +43,7 @@ En la terminal del juego, `help` enseña todo lo que entiende, `mapa` los nivele
 
 Cada nivel es una **misión** (arreglas el cluster y se comprueba solo) o una **pregunta** (investigas y contestas con `responder <valor>`). La misión siempre dice qué namespace usar (`-n nivel-N`).
 
-- **Los primeros pasos (Mundo 1) son opcionales:** si ya sabes lo básico, empieza por el Mundo 2 (`nivel 14`). A partir de ahí los niveles se desbloquean en orden.
-- **Modo EXPERTO:** el botón de la cabecera (o `experto`) abre todos los niveles.
+- **Todos los niveles están abiertos:** lo recomendable es ir en orden, pero si ya sabes lo básico empieza por el Mundo 2 (`nivel 14`) o salta a donde quieras con `nivel N` o el mapa.
 - **Rangos:** subes de rango según los XP que ganas. Cada pista resta 20 XP y ver la solución deja el nivel a 0.
 - **Trampas:** borrar lo que está roto o dar permisos de más no cuenta como arreglarlo.
 

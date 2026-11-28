@@ -4,7 +4,7 @@
    ========================================================================== */
 "use strict";
 
-const VERSION_JUEGO = "3.5";
+const VERSION_JUEGO = "3.6";
 const CLAVE_PARTIDA = "eksquest3";
 const NUEVOS_AL_PRINCIPIO = 6;   // la v3.1 metió 6 niveles nuevos delante: los de la v2/3.0 suben 6 puestos
 let P = {hechos:{}, actual:1, pistas:{}, solucion:{}};
@@ -43,10 +43,9 @@ function proximoRango(){ const x = xpTotal(); const s = RANGOS.find(([d]) => d >
 const esOpcional = id => !!NIVELES[id] && NIVELES[id].mundo === 1;
 function siguienteObligatorio(){ for (let k = 1; k <= MAX; k++) if (!esOpcional(k) && !(k in P.hechos)) return k; return null; }
 function primerBloqueado(){ for (let k = 1; k <= MAX; k++) if (!esOpcional(k) && !(k in P.hechos)) return k + 1; return MAX + 1; }   // el primero sin hacer está abierto; los de después, cerrados
-function desbloqueado(id){ return id >= 1 && id <= MAX && (P.experto || esOpcional(id) || id < primerBloqueado()); }
+function desbloqueado(id){ return id >= 1 && id <= MAX; }   // todos los niveles abiertos: cada uno va a su ritmo (y en varios ordenadores no hace falta nada)
 function irANivel(id){
   if (!id){ irA(null); return; }
-  if (!desbloqueado(id)){ const p = siguienteObligatorio(); out(`🔒 El nivel ${id} está bloqueado: desde el Mundo 2 los niveles se desbloquean en orden. Ahora te toca el nivel ${p} («${NIVELES[p].t}»). Escribe «nivel ${p}», o pulsa «Modo EXPERTO» para abrirlos todos.`, "c-am"); return; }
   irA(id);
 }
 function siguientePendiente(desde){ for (let k = desde; k <= MAX; k++) if (!(k in P.hechos)) return k; for (let k = 1; k < desde; k++) if (!(k in P.hechos)) return k; return null; }
@@ -80,7 +79,7 @@ const JUEGO = {
       case "pista": pedirPista(); return true;
       case "comprobar": comprobar(false); return true;
       case "responder": responder(args.join(" ")); return true;
-      case "siguiente": { if (!(P.actual in P.hechos) && !esOpcional(P.actual) && !P.experto){ out(`Primero supera el nivel ${P.actual}: los niveles van en orden. ¿Atascado? «pista» (−20 XP) o «solucion».`, "c-am"); return true; }
+      case "siguiente": {
         irANivel(P.actual >= MAX ? null : P.actual + 1); return true; }
       case "anterior": irANivel(Math.max(1, P.actual - 1)); return true;
       case "nivel": { const n = parseInt(args[0], 10); if (!(n >= 1 && n <= MAX)){ out(`Uso: nivel <1-${MAX}>`, "c-am"); return true; } irANivel(n); return true; }
@@ -90,11 +89,7 @@ const JUEGO = {
       case "chuletas": case "chuleta": abrirChuletas(args[0]); return true;
       case "exportar": case "guardar": exportarPartida(); return true;
       case "importar": case "cargar": if (args.length) importarPartida(args.join(" ")); else if (typeof document !== "undefined") cargarDesdeFichero(); else out("Uso: importar <código EKSQ1:…>", "c-am"); return true;
-      case "experto": {
-        const apagar = /^(off|no|desactivar|quitar)$/i.test(args[0] || "");
-        P.experto = !apagar; guardarPartida();
-        out(apagar ? "🔒 Modo experto desactivado: los niveles vuelven a desbloquearse en orden." : "🔓 Modo experto: todos los niveles abiertos (salta con «nivel N»; el Mundo 9 empieza en el 67 y el examen es el 76). Para volver al orden: «experto off».", "c-mag");
-        if (typeof document !== "undefined" && $("mapa")) pintarPanel(); return true; }
+      case "experto": out("Ya no hace falta: todos los niveles están abiertos. Salta con «nivel N» o pulsa el número en el mapa.", "c-dim"); return true;
       case "progreso": case "estado": case "rango": { const pr = proximoRango(); out(`${rango()} · ${xpTotal()} XP · ${Object.keys(P.hechos).length}/${MAX} niveles${pr ? ` · siguiente rango: ${pr.nombre} (faltan ${pr.faltan} XP)` : " · rango máximo"}`, "c-mag"); return true; }
     }
     return false;
@@ -246,7 +241,6 @@ function ayuda(tema){
   out(`COMANDOS DEL JUEGO
   mision · pista (−20 XP) · comprobar · responder <x> · solucion (nivel a 0 XP)
   siguiente · anterior · nivel <N> · repetir · mapa · chuletas · progreso · clear
-  experto  → abre todos los niveles (para quien ya sabe; «experto off» para volver al orden)
   exportar → copia de tu partida (fichero .json + código) · importar <código> → la recupera, también en otro navegador
   sleep <seg>  → hace avanzar el reloj del cluster (para esperar a que algo arranque)
 
@@ -278,7 +272,6 @@ function pintarPanel(){
   const n = NIVEL();
   $("xp").textContent = `${xpTotal()} XP`; $("rango").textContent = rango();
   $("niv").textContent = `${Object.keys(P.hechos).length}/${MAX}`;
-  if ($("btnExperto")){ $("btnExperto").textContent = P.experto ? "🔓 Modo EXPERTO: activado" : "🔒 Modo EXPERTO"; $("btnExperto").classList.toggle("verde", !!P.experto); }
   $("prog").style.width = (Object.keys(P.hechos).length / MAX * 100) + "%";
   $("numnivel").textContent = `NIVEL ${n.id} · MUNDO ${n.mundo}: ${MUNDOS[n.mundo - 1].toUpperCase()}`;
   $("titulo").textContent = (n.id in P.hechos ? "✅ " : "") + n.t;
@@ -393,7 +386,7 @@ function bienvenida(estado){
  ███████╗██║ ╚████║   ███████╗███████╗██║  ██║██║ ╚═╝ ██║██║  ██║███████║
  ╚══════╝╚═╝  ╚═══╝   ╚══════╝╚══════╝╚═╝  ╚═╝╚═╝     ╚═╝╚═╝  ╚═╝╚══════╝  v${VERSION_JUEGO}</pre>`);
   out(`Cluster simulado «eks-juego» · cuenta de laboratorio · Kubernetes ${K8S_MINOR} · 1 nodo t3.medium.
-76 niveles en 10 mundos, de «¿cómo se llama este Pod?» a mirar los cgroups por dentro. Los primeros pasos (Mundo 1) son opcionales: puedes empezar por el Mundo 2 («nivel 14»). Desde ahí se desbloquean en orden («Modo EXPERTO» los abre todos). Es un simulador: después, practícalo en un cluster real (kind, Killercoda o un EKS de pruebas). Los comandos son los REALES de kubectl y aws: lo que aprendas aquí vale en EKS.
+76 niveles en 10 mundos, de «¿cómo se llama este Pod?» a mirar los cgroups por dentro. Todos los niveles están abiertos: lo recomendable es ir en orden, pero si ya sabes lo básico puedes empezar por el Mundo 2 («nivel 14») o saltar a donde quieras. Es un simulador: después, practícalo en un cluster real (kind, Killercoda o un EKS de pruebas). Los comandos son los REALES de kubectl y aws: lo que aprendas aquí vale en EKS.
 «help» = comandos · «mapa» = niveles · 📚 Chuletas arriba · ↑/↓ historial · Tab autocompleta.`, "c-dim");
   if (estado === "migrada") out("Partida anterior migrada: tus niveles superados se conservan con la nueva numeración (ahora hay 6 niveles nuevos al principio).", "c-am");
   if (estado === "ok" && Object.keys(P.hechos).length) out(`Partida recuperada: ${Object.keys(P.hechos).length}/${MAX} niveles · ${xpTotal()} XP. (El cluster se regenera al entrar en cada nivel.)`, "c-dim");
