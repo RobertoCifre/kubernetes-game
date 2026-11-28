@@ -4,7 +4,7 @@
    ========================================================================== */
 "use strict";
 
-const VERSION_JUEGO = "3.1";
+const VERSION_JUEGO = "3.2";
 const CLAVE_PARTIDA = "eksquest3";
 const NUEVOS_AL_PRINCIPIO = 6;   // la v3.1 metió 6 niveles nuevos delante: los de la v2/3.0 suben 6 puestos
 let P = {hechos:{}, actual:1, pistas:{}, solucion:{}};
@@ -35,7 +35,7 @@ function cargarPartida(){
 }
 const xpTotal = () => Object.values(P.hechos).reduce((a, b) => a + b, 0);
 const RANGOS = [[0, "🐣 Becario de Kubernetes"], [300, "📦 Junior de pods"], [900, "🔧 Operador de cluster"], [2000, "🛠️ Administrador EKS"],
-                [3300, "🚒 SRE de guardia"], [4600, "🔬 Cirujano de contenedores"], [6000, "👑 Maestro EKS"]];
+                [3300, "🚒 SRE de guardia"], [4600, "🔬 Cirujano de contenedores"], [6000, "👑 Maestro EKS"], [7300, "🎓 Listo para la CKA"]];
 function rangoDe(x){ let r = RANGOS[0][1]; for (const [d, n] of RANGOS) if (x >= d) r = n; return r; }
 function rango(){ return rangoDe(xpTotal()); }
 function proximoRango(){ const x = xpTotal(); const s = RANGOS.find(([d]) => d > x); return s ? {nombre:s[1], faltan:s[0] - x} : null; }
@@ -93,9 +93,9 @@ const JUEGO = {
 function nsDelNivel(n){ return S && S.ns && S.ns["nivel-" + n.id] ? "nivel-" + n.id : null; }
 function lineaNs(n){ const ns = nsDelNivel(n); return ns ? `📁 Namespace de este nivel: ${ns}  →  añade  -n ${ns}  a tus comandos (en este juego el namespace es siempre «nivel-» + el número del nivel)` : "📁 Este nivel no tiene namespace propio: se trabaja con los nodos, con kube-system o con AWS"; }
 function textoMision(n){ return `━━━ NIVEL ${n.id} · ${MUNDOS[n.mundo - 1]} · ${n.t} ━━━\n${n.m}`; }
-function mostrarMision(){ const n = NIVEL(); out(textoMision(n), "c-am"); out(lineaNs(n), "c-cian"); }
+function mostrarMision(){ const n = NIVEL(); out(textoMision(n), "c-am"); out(lineaNs(n), "c-cian"); if (n.trasMision) n.trasMision(); }
 function irA(id){
-  if (!id){ out("🏆 ¡Has superado los 66 niveles! Ahora, a practicarlo en un cluster de verdad: kind o minikube en tu PC, o un EKS de pruebas.", "c-ok"); return; }
+  if (!id){ out("🏆 ¡Has superado los 76 niveles! Ahora, a practicarlo en un cluster de verdad: kind o minikube en tu PC, o un EKS de pruebas.", "c-ok"); return; }
   P.actual = id; guardarPartida(); SUPERADO_AHORA = false;
   MODO = null; JUEGO.cambioPrompt();
   estadoBase();
@@ -120,7 +120,8 @@ function verSolucion(){
   P.solucion[n.id] = true; guardarPartida();
   out("📖 Solución:\n" + n.sol, "c-mag");
 }
-function premio(n){ return P.solucion[n.id] && !(n.id in P.hechos) ? 0 : Math.max(0, 100 - 20 * (P.pistas[n.id] || 0)); }
+function pctTareas(n){ const t = n.tareas || []; if (!t.length) return 0; let b = 0; for (const x of t){ try { if (x.ok()) b++; } catch(e){} } return Math.round(100 * b / t.length); }
+function premio(n){ if (Array.isArray(n.tareas)) return Math.round(Math.max(0, (P.solucion[n.id] && !(n.id in P.hechos) ? 0 : 100 - 20 * (P.pistas[n.id] || 0))) * pctTareas(n) / 100); return P.solucion[n.id] && !(n.id in P.hechos) ? 0 : Math.max(0, 100 - 20 * (P.pistas[n.id] || 0)); }
 function superar(){
   const n = NIVEL(); if (SUPERADO_AHORA) return; SUPERADO_AHORA = true;
   const antes = P.hechos[n.id], xp = premio(n), rangoAntes = rango();
@@ -137,6 +138,13 @@ function comprobar(silencio){
   const n = NIVEL();
   if (n.tipo === "pregunta"){ if (!silencio) out("Este nivel es una pregunta: contesta con «responder <valor>».", "c-am"); return; }
   reconciliar();
+  if (Array.isArray(n.tareas)){
+    const pct = pctTareas(n);
+    if (!silencio){ out(n.tareas.map((x, i) => { let b = false; try { b = x.ok(); } catch(e){} return `${b ? "✅" : "⬜"} ${i + 1}. ${x.t}`; }).join("\n") + `\nNota: ${pct} %  (se aprueba con 66 %)`, pct >= 66 ? "c-ok" : "c-am"); }
+    if (pct >= 66 && premio(n) > (P.hechos[n.id] ?? -1)){ SUPERADO_AHORA = false; superar(); }
+    else if (!silencio && pct < 66) out("❌ Todavía no llegas al 66 %. Sigue con otra tarea (son independientes).", "c-err");
+    return;
+  }
   let ok = false; try { ok = n.ok(); } catch(e){ ok = false; }
   if (ok) superar();
   else if (!silencio) out(SUPERADO_AHORA ? "Ya lo superaste: escribe «siguiente»." : "❌ Todavía no. Investiga con get / describe / logs, o pide una «pista».", SUPERADO_AHORA ? "c-dim" : "c-err");
@@ -306,7 +314,7 @@ function bienvenida(estado){
  ███████╗██║  ██╗███████║    ╚██████╔╝╚██████╔╝███████╗███████║   ██║
  ╚══════╝╚═╝  ╚═╝╚══════╝     ╚══▀▀═╝  ╚═════╝ ╚══════╝╚══════╝   ╚═╝  v${VERSION_JUEGO}</pre>`);
   out(`Cluster simulado «eks-juego» · cuenta de laboratorio · Kubernetes ${K8S_MINOR} · 1 nodo t3.medium.
-66 niveles en 8 mundos, de «¿cómo se llama este Pod?» a mirar los cgroups por dentro. Se desbloquean en orden. Los comandos son los REALES de kubectl y aws: lo que aprendas aquí vale en EKS.
+76 niveles en 10 mundos, de «¿cómo se llama este Pod?» a mirar los cgroups por dentro. Se desbloquean en orden. Los comandos son los REALES de kubectl y aws: lo que aprendas aquí vale en EKS.
 «help» = comandos · «mapa» = niveles · 📚 Chuletas arriba · ↑/↓ historial · Tab autocompleta.`, "c-dim");
   if (estado === "migrada") out("Partida anterior migrada: tus niveles superados se conservan con la nueva numeración (ahora hay 6 niveles nuevos al principio).", "c-am");
   if (estado === "ok" && Object.keys(P.hechos).length) out(`Partida recuperada: ${Object.keys(P.hechos).length}/${MAX} niveles · ${xpTotal()} XP. (El cluster se regenera al entrar en cada nivel.)`, "c-dim");

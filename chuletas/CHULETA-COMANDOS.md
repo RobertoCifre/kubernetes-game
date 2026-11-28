@@ -35,6 +35,8 @@ Busca el recurso que falla y ve a la sección. Los números son los de esta chul
 | **Permisos** (`Forbidden`, RBAC, ServiceAccounts) | 2 · `create serviceaccount` · `role` · `rolebinding` · `clusterrole` · `clusterrolebinding` | 5 · borrar el que sobra · 2 · crear el correcto · 3 · `edit` | 1 · `auth can-i` · CHULETA-SEGURIDAD |
 | **Seguridad del Pod** (Pod Security, root, capabilities) | YAML «restricted» en CHULETA-YAML | `apply -f -` con el securityContext (2) · 3 · `label namespace` | 1 · `get events` (*FailedCreate*) · CHULETA-SEGURIDAD |
 | **Red entre Pods** (NetworkPolicy) | YAML en CHULETA-YAML y CHULETA-RED | `apply -f -` (2) · `delete netpol` (5) | 1 · `get netpol` · `describe netpol` |
+| **Pod con varios contenedores** (READY 1/2, sidecars, logs de uno) | YAML: otro elemento en `containers:` (CHULETA-BAJO-EL-CAPO) | 3 · `edit` · `set env -c <contenedor>` | 1 · `logs -c` · `--all-containers` · 4 · `exec -c` |
+| **El nodo por dentro** (PID de un contenedor, cgroup, reglas de kube-proxy, kubelet) | — | 6 · `systemctl start kubelet` | `kubectl debug node/<nodo>` · `crictl ps/inspect` · `iptables-save` · CHULETA-BAJO-EL-CAPO |
 | **Dentro del contenedor** (procesos, cgroups, token, imagen sin shell, init containers) | — | Lo que encuentres se arregla en 2 o 3 | 4 · `exec` · `debug` · 1 · `logs -c` · CHULETA-BAJO-EL-CAPO |
 | **AWS** (cuenta, versión del cluster, node group, credenciales de AWS para un Pod) | Pod Identity: CHULETA-BAJO-EL-CAPO | 6 · node group | `aws sts get-caller-identity` · `aws eks describe-cluster` · CHULETA-AWS-EKS |
 
@@ -163,6 +165,7 @@ kubectl create deployment <nombre> --image=<imagen:tag> --replicas=<N> -n <ns>
 kubectl expose deployment <nombre> --port=<puerto> -n <ns>                     # interno (ClusterIP)
 kubectl expose deployment <nombre> --port=80 --target-port=8080 -n <ns>        # si el contenedor escucha en otro puerto
 kubectl expose deployment <nombre> --port=80 --type=LoadBalancer -n <ns>       # público: AWS crea un balanceador
+kubectl expose deployment <nombre> --name=<svc> --port=80 --target-port=<puerto|nombre-del-puerto> --type=NodePort -n <ns>   # abre un puerto 30000-32767 en cada nodo
 
 # Configuración y secretos
 kubectl create configmap <nombre> --from-literal=<CLAVE>=<valor> -n <ns>
@@ -225,6 +228,7 @@ kubectl set resources deployment <nombre> --limits=memory=256Mi -n <ns>
 kubectl set env deployment/<nombre> CLAVE=valor -n <ns>      # añadir o cambiar
 kubectl set env deployment/<nombre> CLAVE- -n <ns>           # quitar (el - final)
 kubectl set env deployment/<nombre> --list -n <ns>           # ver las que tiene
+kubectl set env deployment/<nombre> -c <contenedor> CLAVE=valor -n <ns>   # en un contenedor concreto (sin -c: el primero)
 
 # Cambiar a qué pods apunta un Service
 kubectl set selector service <nombre> <clave>=<valor> -n <ns>
@@ -379,6 +383,7 @@ Más comandos de AWS: CHULETA-AWS-EKS.
 | `StartError` / `RunContainerError` | El comando del contenedor no existe o no se puede lanzar | `describe pod` → *executable file not found* | 3 (`edit`, `patch` del command) |
 | `Running` pero `0/1` | Vive, pero no pasa la *readiness probe*, así que no recibe tráfico | `describe pod` → *Readiness probe failed…* | 3 (`edit`, `patch` de la sonda) |
 | `RESTARTS` que suben con el Pod `Running` | Falla la *liveness probe* y el kubelet lo reinicia | `describe pod` → *Liveness probe failed…* | 3 (`edit`, `patch` de la sonda) |
+| `READY 1/2` (Pod con varios contenedores) | Uno de los contenedores no está listo o se reinicia | `describe pod` → el bloque de cada contenedor · `logs -c <contenedor>` | 3 (`edit`, `set env -c`) |
 | `Init:0/1` · `Init:CrashLoopBackOff` | Un init container no termina: espera algo o falla | `logs <pod> -c <init>` · `describe pod` → *Init Containers* | Lo que espere: 2 (crear el Service, el Secret…) |
 | Menos Pods de los que pide el Deployment | El ReplicaSet no puede crearlos (cuota, PodSecurity) | `get events` → *FailedCreate* | 3 (`edit` la cuota) · CHULETA-SEGURIDAD |
 | La versión nueva no termina de desplegarse | Los Pods nuevos fallan; los viejos siguen | `rollout status` · `get pods` | 3 (`rollout undo`) |
@@ -445,7 +450,7 @@ kubens default                           # volver
 
 ```text
 help                 # todos los comandos que entiende el simulador
-mapa                 # los 66 niveles y cuáles llevas (se desbloquean en orden)
+mapa                 # los 76 niveles y cuáles llevas (se desbloquean en orden)
 mision               # vuelve a enseñar la misión
 pista                # una pista (−20 XP)
 comprobar            # ¿lo he resuelto? (las misiones se comprueban solas)

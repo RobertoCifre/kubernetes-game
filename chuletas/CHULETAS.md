@@ -26,6 +26,9 @@ Todas sirven para el EKS real y para el juego. Empieza por la de comandos; las d
 | Un Pod en `Init:0/1` o `Init:CrashLoopBackOff` | CHULETA-BAJO-EL-CAPO | Init containers |
 | Quiero ver por dentro: PID 1, cgroups, capabilities, token | CHULETA-BAJO-EL-CAPO | |
 | Una imagen sin shell (`exec` no sirve) | CHULETA-BAJO-EL-CAPO | kubectl debug |
+| Un Pod `READY 1/2`, sidecars, contenedores que comparten red o ficheros | CHULETA-BAJO-EL-CAPO | Pods con varios contenedores |
+| IP de un Pod, DNS por dentro, cómo funciona un Service (kube-proxy, iptables) | CHULETA-RED · CHULETA-BAJO-EL-CAPO | La red del Pod |
+| Mirar desde el nodo: crictl, PIDs, cgroups, kubelet | CHULETA-BAJO-EL-CAPO | Desde el nodo |
 | Permisos en todo el cluster, o credenciales de AWS para un Pod | CHULETA-BAJO-EL-CAPO | ClusterRole · Pod Identity |
 
 ## Todas las chuletas

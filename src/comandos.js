@@ -497,8 +497,8 @@ function podObjetivo(ref, ns, soloCorriendo){
   }
   return S.pods.find(p => p.ns === ns && p.name === ref && !p.efimero);
 }
-function lineasLog(p){
-  const pr = p.proc || {}; let l = (pr.lineas || []).slice();
+function lineasLog(p, proc){
+  const pr = proc || p.proc || {}; let l = (pr.lineas || []).slice();
   if (pr.bucle && pr.bucle.lineas.length){ const veces = Math.min(60, Math.floor((ahora() - p.arranque) / pr.bucle.periodo)); for (let k = 0; k < veces; k++) l = l.concat(pr.bucle.lineas); }
   return l;
 }
@@ -512,6 +512,18 @@ function kLogs(pos, f, ns){
   const c = p.spec.containers[0];
   const ic = f.c && (p.spec.initContainers || []).find(x => x.name === f.c);
   if (ic){ const l = (p.initLogs || {})[ic.name]; if (!l){ err(`Error from server (BadRequest): container "${ic.name}" in pod "${p.name}" is waiting to start: PodInitializing`); return 1; } if (l.length) out(l.join("\n")); return 0; }
+  if (f["all-containers"] && p.spec.containers.length > 1 && p.arranque !== null){
+    for (const cc of p.spec.containers){ const pr = procContenedor(p, cc.name); let l = pr ? lineasLog(p, pr) : []; if (f.tail !== undefined) l = parseInt(f.tail, 10) > 0 ? l.slice(-parseInt(f.tail, 10)) : [];
+      for (const z of l) out(f.prefix ? `[pod/${p.name}/${cc.name}] ${z}` : z); }
+    return 0;
+  }
+  if (f.c && f.c !== c.name && p.spec.containers.some(x => x.name === f.c)){
+    const lado = (p.lados || []).find(l => l.name === f.c);
+    if (!lado){ err(`Error from server (BadRequest): container "${f.c}" in pod "${p.name}" is waiting to start: ${/^Init:/.test(p.estado) ? "PodInitializing" : "ContainerCreating"}`); return 1; }
+    let l = lineasLog(p, lado.proc); if (f.tail !== undefined) l = parseInt(f.tail, 10) > 0 ? l.slice(-parseInt(f.tail, 10)) : [];
+    if (l.length) out(l.join("\n")); return 0;
+  }
+  if (!f.c && p.spec.containers.length > 1 && !/^Init:/.test(p.estado)) nota(`Defaulted container "${c.name}" out of: ${p.spec.containers.map(x => x.name).join(", ")}`);
   if (f.c && f.c !== c.name){ err(`error: container ${f.c} is not valid for pod ${p.name}`); nota(`   (contenedores: ${[...(p.spec.initContainers || []).map(x => x.name + " [init]"), c.name].join(", ")})`); return 1; }
   if (!f.c && /^Init:/.test(p.estado)){ err(`Error from server (BadRequest): container "${c.name}" in pod "${p.name}" is waiting to start: PodInitializing`); nota(`   (está en ${p.estado}: mira los logs del init container con  -c ${(p.spec.initContainers || [])[0].name})`); return 1; }
   const previo = f.previous || f.p;
@@ -754,7 +766,8 @@ function kSet(pos, f, ns){
   }
   if (sub === "env"){
     const {d, resto} = deploymentObjetivo(pos.slice(1), ns); if (!d) return 1;
-    const c = d.spec.template.spec.containers[0];
+    const c = f.c && f.c !== true ? d.spec.template.spec.containers.find(x => x.name === f.c) : d.spec.template.spec.containers[0];
+    if (!c){ err(`error: unable to find container named "${f.c}"`); nota(`   (contenedores: ${d.spec.template.spec.containers.map(x => x.name).join(", ")})`); return 1; }
     if (f.list){ out(`# deployments/${d.metadata.name}, container ${c.name}`); for (const e of c.env || []) out(e.valueFrom ? `# ${e.name} from ${e.valueFrom.configMapKeyRef ? "configmap " + e.valueFrom.configMapKeyRef.name : "secret " + e.valueFrom.secretKeyRef.name}, key ${(e.valueFrom.configMapKeyRef || e.valueFrom.secretKeyRef).key}` : `${e.name}=${e.value ?? ""}`); return 0; }
     if (!resto.length && !f.from){ err("error: at least one environment variable must be provided"); return 1; }
     c.env = c.env || [];
@@ -1305,7 +1318,11 @@ function kExec(pos, f, ns, tras){
   if (!tras.length){ err(`error: you must specify at least one command for the container\n   (ej: kubectl exec ${p.name} -n ${ns} -- env   ·   shell: kubectl exec -it ${p.name} -n ${ns} -- sh)`); return 1; }
   if (p.estado !== "Running"){ err(`error: unable to upgrade connection: container not found ("${p.spec.containers[0].name}")   — el Pod está en ${p.estado}`); return 1; }
   if (f.c && f.c !== true && !p.spec.containers.some(c => c.name === f.c)){ err(`error: container ${f.c} not found in pod ${p.name}`); nota(`   (contenedores: ${p.spec.containers.map(c => c.name).join(", ")})`); return 1; }
-  const perf = perfil(p.spec.containers[0]);
+  const cont = (f.c && f.c !== true && p.spec.containers.find(c => c.name === f.c)) || p.spec.containers[0];
+  if (!f.c && p.spec.containers.length > 1) nota(`Defaulted container "${cont.name}" out of: ${p.spec.containers.map(c => c.name).join(", ")}`);
+  const lado = cont === p.spec.containers[0] ? null : (p.lados || []).find(l => l.name === cont.name);
+  if (lado && lado.estado !== "Running"){ err(`error: unable to upgrade connection: container not found ("${cont.name}")`); return 1; }
+  const perf = perfil(cont);
   if (perf.tipo === "generico" || perf.tipo === "sistema"){
     err(`error: Internal error occurred: error executing command in container: failed to exec in container: OCI runtime exec failed: exec failed: unable to start container process: exec: "${tras[0]}": executable file not found in $PATH: unknown`);
     nota("   (esta imagen no trae shell ni utilidades. Para mirar dentro: kubectl debug -it <pod> --image=busybox:1.37 --target=<contenedor>)"); return 126;
@@ -1314,9 +1331,9 @@ function kExec(pos, f, ns, tras){
     if (perf.tipo === "generico" || perf.tipo === "sistema"){ err(`error: Internal error occurred: error executing command in container: failed to exec in container: OCI runtime exec failed: exec failed: unable to start container process: exec: "${tras[0]}": executable file not found in $PATH: unknown`); return 126; }
     if (tras[0].includes("bash")){ err(`error: Internal error occurred: error executing command in container: failed to exec in container: OCI runtime exec failed: exec failed: unable to start container process: exec: "bash": executable file not found in $PATH: unknown`); nota("(las imágenes alpine/busybox traen «sh», no «bash»)"); return 126; }
     if (!(f.i && f.t) && !f.it) aviso("(sin -it, una shell no sería interactiva; el juego te la abre igualmente)");
-    MODO = {tipo:"pod", pod:p, ns, perf, prompt:perf.tipo === "web" ? `${p.name}:/# ` : "/ # "}; JUEGO.cambioPrompt(); return 0;
+    MODO = {tipo:"pod", pod:p, ns, perf, c:cont, prompt:perf.tipo === "web" ? `${p.name}:/# ` : "/ # "}; JUEGO.cambioPrompt(); return 0;
   }
-  const r = ejecutarProceso(tras, p.envSnap || {}, p, ns, perf);
+  const r = ejecutarProceso(tras, cont === p.spec.containers[0] ? (p.envSnap || {}) : envPlano(cont), p, ns, perf, cont === p.spec.containers[0] ? undefined : cont, true);
   if (r.fin === "starterror"){ err(`error: Internal error occurred: error executing command in container: failed to exec in container: OCI runtime exec failed: exec failed: unable to start container process: ${r.errorArranque.replace(/^.*?exec:/, "exec:")}`); return 126; }
   if (r.lineas.length) out(r.lineas.join("\n"));
   if (r.fin === "corriendo") nota("(simulador: el comando seguiría corriendo; en el real, Ctrl+C)");
@@ -1341,7 +1358,7 @@ function kDebug(pos, f, ns, tras){
   const inf = imagenInfo(f.image); if (!inf.ok){ err(`(el contenedor efímero no arranca: ErrImagePull de "${f.image}")`); return 1; }
   const perf = perfil({image:f.image});
   if (perf.tipo !== "shell" && perf.tipo !== "web"){ aviso("(simulador) usa una imagen con shell para depurar: --image=busybox:1.37"); return 1; }
-  if (f.target && f.target !== p.spec.containers[0].name){ err(`error: (el Pod ${p.name} no tiene un contenedor llamado "${f.target}"; tiene: ${p.spec.containers.map(c => c.name).join(", ")})`); return 1; }
+  if (f.target && !p.spec.containers.some(c => c.name === f.target)){ err(`error: (el Pod ${p.name} no tiene un contenedor llamado "${f.target}"; tiene: ${p.spec.containers.map(c => c.name).join(", ")})`); return 1; }
   const nombreD = `debugger-${sufijo(5)}`;
   out(`Defaulting debug container name to ${nombreD}.`);
   if (f.target) out(`Targeting container "${f.target}". If you don't see processes from this container it may be because the container runtime doesn't support this feature.`);
@@ -1363,7 +1380,7 @@ function lineaEnShell(linea){
   }
   if (MODO.tipo === "nodo") return comandoNodo(linea);
   const ctx = {env:Object.assign({}, MODO.debug ? {} : (MODO.pod.envSnap || {})), lineas:[], ns:MODO.ns, pod:MODO.pod.efimero ? Object.assign({}, MODO.pod) : MODO.pod, perfil:MODO.perf, hostname:MODO.pod.name, cmdPrincipal:"sh",
-               debug:!!MODO.debug, c:MODO.debug ? {name:"debugger", image:MODO.imagen} : (MODO.pod.spec ? MODO.pod.spec.containers[0] : null),
+               debug:!!MODO.debug, c:MODO.debug ? {name:"debugger", image:MODO.imagen} : (MODO.c || (MODO.pod.spec ? MODO.pod.spec.containers[0] : null)),
                objetivo:MODO.debug ? (MODO.objetivo || null) : (MODO.pod.efimero ? null : MODO.pod)};
   ctx.out = t => ctx.lineas.push(String(t));
   try {
@@ -1377,6 +1394,100 @@ function lineaEnShell(linea){
   if (ctx.lineas.length) out(ctx.lineas.join("\n"));
   reconciliar(); JUEGO.trasComando();
 }
+
+/* ---------- dentro del nodo: crictl, procesos, cgroups, iptables de kube-proxy, nsenter ---------- */
+function contenedoresNodo(n){
+  const l = [];
+  for (const p of S.pods.filter(x => x.node === n.name && !x.borrando)){
+    const idPod = idContenedor(p, "__pod__");
+    p.spec.containers.forEach((c, k) => {
+      const lado = k ? (p.lados || [])[k - 1] : null;
+      const vivo = p.arranque !== null && p.fase === "Running" && (k === 0 ? !/Error|CrashLoop|OOM/.test(p.estado) : lado && lado.estado === "Running");
+      l.push({p, c, id:idContenedor(p, c.name), idPod, vivo, pid:pidNodo(p, c.name), intentos:k ? ((lado && lado.reinicios) || 0) : (p.reinicios || 0)});
+    });
+  }
+  return l;
+}
+function filtrarGrep(texto, filtros){
+  let l = String(texto).split("\n");
+  for (const f of filtros){ const m = f.match(/^grep\s+(-[a-zA-Z]+\s+)?["']?(.+?)["']?$/); if (!m) continue; const i = /i/.test(m[1] || ""), v = /v/.test(m[1] || "");
+    l = l.filter(x => { const e = i ? x.toLowerCase().includes(m[2].toLowerCase()) : x.includes(m[2]); return v ? !e : e; }); }
+  return l.join("\n");
+}
+function reglasKubeProxy(){
+  const L = ["# Generated by iptables-nft-save v1.8.8 (nf_tables)", "*nat", ":KUBE-SERVICES - [0:0]", ":KUBE-NODEPORTS - [0:0]", ":KUBE-POSTROUTING - [0:0]"];
+  const cad = (pref, txt) => pref + (hash(txt).toString(36) + hash(txt + "#").toString(36)).toUpperCase().replace(/[^A-Z0-9]/g, "").padEnd(16, "X").slice(0, 16);
+  const svcs = S.objs.filter(o => o.kind === "Service" && o.spec.clusterIP && o.spec.clusterIP !== "None");
+  const cuerpo = [];
+  for (const s of svcs){
+    const ns = s.metadata.namespace, nombre = s.metadata.name;
+    for (const sp of s.spec.ports || []){
+      const etiqueta = `${ns}/${nombre}${sp.name ? ":" + sp.name : ""}`;
+      const svcCh = cad("KUBE-SVC-", etiqueta);
+      const eps = endpointsDe(s);
+      L.push(`:${svcCh} - [0:0]`);
+      cuerpo.push(`-A KUBE-SERVICES -d ${s.spec.clusterIP}/32 -p tcp -m comment --comment "${etiqueta} cluster IP" -m tcp --dport ${sp.port} -j ${svcCh}`);
+      if (!eps.length){ cuerpo.push(`-A KUBE-SERVICES -d ${s.spec.clusterIP}/32 -p tcp -m comment --comment "${etiqueta} has no endpoints" -m tcp --dport ${sp.port} -j REJECT --reject-with icmp-port-unreachable`); continue; }
+      eps.forEach((p, i) => {
+        const tp = puertoContenedor(p, sp.targetPort) || sp.targetPort;
+        const sep = cad("KUBE-SEP-", etiqueta + p.ip);
+        L.push(`:${sep} - [0:0]`);
+        const resto = eps.length - i;
+        cuerpo.push(`-A ${svcCh} -m comment --comment "${etiqueta} -> ${p.ip}:${tp}"${resto > 1 ? ` -m statistic --mode random --probability ${(1 / resto).toFixed(11)}` : ""} -j ${sep}`);
+        cuerpo.push(`-A ${sep} -s ${p.ip}/32 -m comment --comment "${etiqueta}" -j KUBE-MARK-MASQ`);
+        cuerpo.push(`-A ${sep} -p tcp -m comment --comment "${etiqueta}" -m tcp -j DNAT --to-destination ${p.ip}:${tp}`);
+      });
+    }
+  }
+  return L.concat(cuerpo, ["-A KUBE-SERVICES -m comment --comment \"kubernetes service nodeports\" -m addrtype --dst-type LOCAL -j KUBE-NODEPORTS", "COMMIT"]).join("\n");
+}
+function comandoNodoAvanzado(n, c){
+  const partes = c.split("|").map(x => x.trim()); const cmd = partes[0]; const filtros = partes.slice(1);
+  const sal = t => { out(filtros.length ? filtrarGrep(t, filtros) : t); return true; };
+  let m;
+  if ((m = cmd.match(/^crictl ps(\s+-a)?(?:\s+--name[ =](\S+))?(?:\s+--pod[ =](\S+))?\s*$/))){
+    const todos = !!m[1]; const l = contenedoresNodo(n).filter(x => (todos || x.vivo) && (!m[2] || x.c.name.includes(m[2])) && (!m[3] || x.idPod.startsWith(m[3])));
+    return sal(tabla([["CONTAINER","IMAGE","CREATED","STATE","NAME","ATTEMPT","POD ID","POD"], ...l.map(x => [x.id.slice(0, 13), x.c.image.split("/").pop(), edad(x.p.arranque || x.p.creado) + " ago", x.vivo ? "Running" : "Exited", x.c.name, String(x.intentos), x.idPod.slice(0, 13), x.p.name])]));
+  }
+  if ((m = cmd.match(/^crictl pods(?:\s+--name[ =](\S+))?(?:\s+--namespace[ =](\S+))?\s*$/))){
+    const ps = S.pods.filter(p => p.node === n.name && !p.borrando && (!m[1] || p.name.includes(m[1])) && (!m[2] || p.ns === m[2]));
+    return sal(tabla([["POD ID","CREATED","STATE","NAME","NAMESPACE","ATTEMPT","RUNTIME"], ...ps.map(p => [idContenedor(p, "__pod__").slice(0, 13), edad(p.creado) + " ago", "Ready", p.name, p.ns, "0", "(default)"])]));
+  }
+  if ((m = cmd.match(/^crictl inspect(?:p)?\s+(?:-o\s+json\s+)?(\S+)\s*$/))){
+    const x = contenedoresNodo(n).find(z => z.id.startsWith(m[1]) || z.idPod.startsWith(m[1]));
+    if (!x){ err(`E1128 remote_runtime.go] "ContainerStatus from runtime service failed" err="rpc error: code = NotFound desc = an error occurred when try to find container \\"${m[1]}\\": not found"`); return true; }
+    const j = {status:{id:x.id, metadata:{attempt:x.intentos, name:x.c.name}, state:x.vivo ? "CONTAINER_RUNNING" : "CONTAINER_EXITED", image:{image:x.c.image}, labels:{"io.kubernetes.container.name":x.c.name, "io.kubernetes.pod.name":x.p.name, "io.kubernetes.pod.namespace":x.p.ns, "io.kubernetes.pod.uid":x.p.uid}},
+      info:{sandboxID:x.idPod, pid:x.vivo ? x.pid : 0, runtimeSpec:{process:{args:procesoPrincipal(x.p, x.c).split(" ")}, linux:{cgroupsPath:`kubepods-${qos(x.p.spec).toLowerCase() === "guaranteed" ? "" : qos(x.p.spec).toLowerCase() + "-"}pod${uidSlice(x.p)}.slice:cri-containerd:${x.id}`, namespaces:[{type:"pid"},{type:"ipc", path:`/proc/${pidNodo(x.p, "__pause__")}/ns/ipc`},{type:"uts", path:`/proc/${pidNodo(x.p, "__pause__")}/ns/uts`},{type:"mount"},{type:"network", path:`/proc/${pidNodo(x.p, "__pause__")}/ns/net`},{type:"cgroup"}]}}}};
+    return sal(JSON.stringify(j, null, 2));
+  }
+  if ((m = cmd.match(/^cat\s+\/proc\/(\d+)\/(cgroup|cmdline|oom_score_adj|status)\s*$/))){
+    const pid = parseInt(m[1], 10);
+    const x = contenedoresNodo(n).find(z => z.vivo && z.pid === pid);
+    if (!x){ err(`cat: /proc/${pid}/${m[2]}: No such file or directory`); return true; }
+    if (m[2] === "cgroup") return sal("0::" + rutaCgroup(x.p, x.c.name));
+    if (m[2] === "cmdline") return sal(procesoPrincipal(x.p, x.c));
+    if (m[2] === "oom_score_adj") return sal(String(oomScoreAdj(x.p, x.c)));
+    return sal(`Name:\t${procesoPrincipal(x.p, x.c).split(/[ :]/)[0].replace(/^\//, "")}\nState:\tS (sleeping)\nTgid:\t${pid}\nNSpid:\t${pid}\t1\nPid:\t${pid}\nPPid:\t${pid - 3}\nUid:\t${usuarioDe(x.p, x.c)}\t${usuarioDe(x.p, x.c)}\t${usuarioDe(x.p, x.c)}\t${usuarioDe(x.p, x.c)}`);
+  }
+  if (/^ps(\s+(aux|-ef|-e|axf))?\s*$/.test(cmd)){
+    const filas = [["USER","PID","%CPU","%MEM","COMMAND"], ["root","1","0.0","0.3","/usr/lib/systemd/systemd --switched-root --system --deserialize=32"], ["root","1834","1.2","2.1","/usr/bin/containerd"], ["root","1902","2.5","3.4","/usr/bin/kubelet --config /etc/kubernetes/kubelet/config.json --kubeconfig /var/lib/kubelet/kubeconfig --container-runtime-endpoint unix:///run/containerd/containerd.sock"]];
+    for (const x of contenedoresNodo(n).filter(z => z.vivo)) filas.push([String(usuarioDe(x.p, x.c) === 0 ? "root" : usuarioDe(x.p, x.c)), String(x.pid), "0.1", "0.2", procesoPrincipal(x.p, x.c)]);
+    return sal(tabla(filas));
+  }
+  if (/^iptables-save(\s+-t\s+nat)?\s*$/.test(cmd) || /^iptables\s+(-t\s+nat\s+)?-S(\s+KUBE-\S+)?\s*$/.test(cmd)) return sal(reglasKubeProxy());
+  if ((m = cmd.match(/^iptables\s+-t\s+nat\s+-L(?:\s+(KUBE-\S+))?(?:\s+-n)?(?:\s+-v)?\s*$/))){
+    const r = reglasKubeProxy().split("\n").filter(l => l.startsWith("-A " + (m[1] || "KUBE-SERVICES") + " "));
+    return sal(`Chain ${m[1] || "KUBE-SERVICES"} (2 references)\ntarget     prot opt source               destination\n` + r.map(l => l.replace(/^-A \S+ /, "")).join("\n"));
+  }
+  if ((m = cmd.match(/^nsenter\s+(?:-t|--target)[ =]?(\d+)\s+(?:-n|--net)\s+(?:--\s+)?(.+)$/))){
+    const pid = parseInt(m[1], 10); const x = contenedoresNodo(n).find(z => z.vivo && z.pid === pid);
+    if (!x){ err(`nsenter: cannot open /proc/${pid}/ns/net: No such file or directory`); return true; }
+    if (/^ip (a|addr)/.test(m[2]) || /^ip a$/.test(m[2])){ const ctx = {pod:x.p, out:t => out(t)}; comandoSimple("ip addr", Object.assign(ctx, {env:{}, lineas:[], perfil:{tipo:"shell"}, c:x.c})); return true; }
+    if (/^(ss|netstat)/.test(m[2])){ return sal("State   Recv-Q  Send-Q   Local Address:Port   Peer Address:Port\n" + escuchaPod(x.p).map(pt => `LISTEN  0       511            0.0.0.0:${pt}         0.0.0.0:*`).join("\n")); }
+    err("(simulador) dentro de nsenter -n: ip addr · ss -tlnp"); return true;
+  }
+  return false;
+}
 function comandoNodo(linea){
   const n = S.nodes.find(x => x.id === MODO.id);
   const a = trocear(linea.replace(/^sudo\s+/, "")); const c = a.join(" ");
@@ -1387,13 +1498,14 @@ function comandoNodo(linea){
   if (/^systemctl (start|restart) kubelet/.test(c)){ n.roto = false; n.ready = true; nota("(kubelet arrancado: el nodo volverá a Ready. En EKS lo habitual con un nodo dañado es reemplazarlo, que es lo que pide el nivel.)"); reconciliar(); JUEGO.trasComando(); return; }
   if (/^systemctl stop kubelet/.test(c)){ n.roto = true; n.ready = false; n.rotoDesde = ahora(); nota("(kubelet parado: en ~40 s el nodo saldrá NotReady)"); reconciliar(); return; }
   if (/^journalctl/.test(c)){ out(n.roto ? `${new Date().toUTCString()} ${n.name.split(".")[0]} systemd[1]: Stopping kubelet.service - Kubernetes Kubelet...\n${new Date().toUTCString()} ${n.name.split(".")[0]} systemd[1]: kubelet.service: Deactivated successfully.\n${new Date().toUTCString()} ${n.name.split(".")[0]} systemd[1]: Stopped kubelet.service - Kubernetes Kubelet.` : `I1127 kubelet.go:2475] "SyncLoop (PLEG): event for pod"\nI1127 kubelet_node_status.go:75] "Successfully registered node" node="${n.name}"`); return; }
+  if (comandoNodoAvanzado(n, c)) return;
   if (/^crictl (ps|pods)/.test(c)){ const ps = S.pods.filter(p => p.node === n.name); out(tabla([["CONTAINER","IMAGE","CREATED","STATE","NAME","POD"], ...ps.map(p => [hash(p.uid).toString(16).slice(0,13), p.spec.containers[0].image.split("/").pop(), edad(p.creado) + " ago", p.estado === "Running" ? "Running" : "Exited", p.spec.containers[0].name, p.name])])); return; }
   if (/^(hostname)$/.test(c)){ out(n.name); return; }
   if (/^free/.test(c)){ out("               total        used        free      shared  buff/cache   available\nMem:            3835         812        1520           1        1502        2795\nSwap:              0           0           0"); return; }
   if (/^df/.test(c)){ out("Filesystem      Size  Used Avail Use% Mounted on\n/dev/nvme0n1p1   20G  4.1G   16G  21% /"); return; }
   if (/^cat \/etc\/os-release/.test(c)){ out('NAME="Amazon Linux"\nVERSION="2023"\nPRETTY_NAME="Amazon Linux 2023.12.20261118"'); return; }
   if (/^(ls|pwd|whoami|id)/.test(c)){ out(c.startsWith("whoami") ? "ssm-user" : c.startsWith("id") ? "uid=1001(ssm-user) gid=1001(ssm-user) groups=1001(ssm-user)" : c.startsWith("pwd") ? "/usr/bin" : ""); return; }
-  err(`sh: ${a[0]}: (simulador) en el nodo: systemctl status|start|stop kubelet · journalctl -u kubelet · crictl ps · free -m · df -h · exit`);
+  err(`sh: ${a[0]}: (simulador) en el nodo: systemctl status|start|stop kubelet · journalctl -u kubelet · crictl ps|pods|inspect · ps aux · cat /proc/<pid>/cgroup · iptables-save · nsenter -t <pid> -n ip addr · free -m · df -h · exit`);
 }
 function kPortForward(pos, f, ns){
   if (!compruebaNs(ns)) return 1;
@@ -1426,7 +1538,7 @@ function curlLocal(prog, args){
     if (!pf){ err(`curl: (7) Failed to connect to localhost port ${u.puerto} after 0 ms: Couldn't connect to server`); nota("   (¿falta el kubectl port-forward? Mira «kubectl port-forward -h»)"); return 7; }
     const p = S.pods.find(x => x.ns === pf.ns && x.name === pf.pod);
     if (!p || p.estado !== "Running"){ err("curl: (52) Empty reply from server"); nota(`(el port-forward se ha roto: el Pod ${pf.pod} ya no existe o no corre. Vuelve a lanzarlo)`); delete S.pf[u.puerto]; return 52; }
-    if (!p.proc || p.proc.escucha !== pf.remoto){ err("curl: (52) Empty reply from server"); aviso(`Handling connection for ${u.puerto}\nE1127 portforward.go:424] "Unhandled Error" err="an error occurred forwarding ${u.puerto} -> ${pf.remoto}: error forwarding port ${pf.remoto} to pod ${p.name}: failed to connect to localhost:${pf.remoto} inside namespace: connection refused"`); return 52; }
+    if (!escuchaPod(p).includes(pf.remoto)){ err("curl: (52) Empty reply from server"); aviso(`Handling connection for ${u.puerto}\nE1127 portforward.go:424] "Unhandled Error" err="an error occurred forwarding ${u.puerto} -> ${pf.remoto}: error forwarding port ${pf.remoto} to pod ${p.name}: failed to connect to localhost:${pf.remoto} inside namespace: connection refused"`); return 52; }
     nota(`Handling connection for ${u.puerto}`);
     const r = contenidoWeb(p, u.ruta); out(r.cuerpo); JUEGO.marca("curl-local"); return 0;
   }

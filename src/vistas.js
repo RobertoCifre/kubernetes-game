@@ -28,7 +28,7 @@ function estadoDeployment(d){
 function aObjetoPod(p){
   const n = S.nodes.find(x => x.name === p.node);
   const c = p.spec.containers[0];
-  const st = {name:c.name, image:c.image, ready:!!p.listo, restartCount:p.reinicios || 0, started:p.fase === "Running"};
+  const st = {name:c.name, image:c.image, ready:p.listos ? !!p.listos[0] : !!p.listo, restartCount:p.reinicios || 0, started:p.fase === "Running"};
   if (p.estado === "Running") st.state = {running:{startedAt:fechaISO(p.arranque || p.creado)}};
   else if (p.fase === "Succeeded" || p.fase === "Failed") st.state = {terminated:{exitCode:p.terminado ? p.terminado.codigo : 0, reason:p.estado}};
   else st.state = {waiting:{reason:p.estado === "Pending" ? "ContainerCreating" : /^Init:/.test(p.estado) ? "PodInitializing" : p.estado, message:p.errorConfig || (p.ultimo && p.ultimo.msg) || undefined}};
@@ -39,7 +39,7 @@ function aObjetoPod(p){
     spec:Object.assign(copia(p.spec), p.node ? {nodeName:p.node} : {}),
     status:{phase:p.fase, podIP:p.ip || undefined, hostIP:n ? n.ip : undefined, qosClass:qos(p.spec),
       conditions:[{type:"PodScheduled", status:p.node ? "True" : "False", reason:p.node ? undefined : "Unschedulable", message:p.node ? undefined : motivoPendiente(p)}, {type:"Ready", status:p.listo ? "True" : "False"}],
-      containerStatuses:p.node ? [st] : undefined,
+      containerStatuses:p.node ? [st].concat((p.spec.containers || []).slice(1).map((sc, k) => { const l = (p.lados || [])[k]; return {name:sc.name, image:sc.image, ready:!!(p.listos && p.listos[k + 1]), restartCount:(l && l.reinicios) || 0, started:!!(l && l.estado === "Running"), state:l && l.estado === "Running" ? {running:{startedAt:fechaISO(p.arranque || p.creado)}} : {waiting:{reason:l ? "CrashLoopBackOff" : "ContainerCreating"}}}; })) : undefined,
       initContainerStatuses:p.node && (p.spec.initContainers || []).length ? p.spec.initContainers.map((ic, k) => { const hecho = p.initHecho || (p.initIdx || 0) > k; return {name:ic.name, image:ic.image, ready:hecho, restartCount:!hecho && (p.initIdx || 0) === k ? (p.reinicios || 0) : 0, state:hecho ? {terminated:{exitCode:0, reason:"Completed"}} : (p.initIdx || 0) === k && p.esperandoInit ? {running:{}} : {waiting:{reason:"PodInitializing"}}}; }) : undefined}};
 }
 function aObjetoNodo(n){
@@ -86,12 +86,13 @@ const labelsDe = (kind, x) => kind === "Pod" ? x.labels : kind === "Node" ? etiq
 const tiempoDe = (kind, x) => kind === "Pod" ? x.creado : kind === "Node" ? x.creado : kind === "Namespace" ? x.creado : kind === "ReplicaSet" ? x.creado : kind === "ClusterRole" && !x.metadata ? (S ? S.creado : 0) : ((x.metadata && x.metadata._t) || 0);
 
 /* ---------- filas de `kubectl get` ---------- */
-function reiniciosTxt(p){ return p.reinicios ? `${p.reinicios} (${Math.max(1, Math.floor((ahora() - p.arranque) % CICLO_CRASH))}s ago)` : "0"; }
+function reiniciosTotal(p){ return (p.reinicios || 0) + (p.lados || []).reduce((s, l) => s + (l.reinicios || 0), 0); }
+function reiniciosTxt(p){ if (!p.reinicios && reiniciosTotal(p)) return `${reiniciosTotal(p)} (${Math.max(1, Math.floor((ahora() - p.arranque) % CICLO_CRASH))}s ago)`; return p.reinicios ? `${p.reinicios} (${Math.max(1, Math.floor((ahora() - p.arranque) % CICLO_CRASH))}s ago)` : "0"; }
 function puertosTxt(s){ return (s.spec.ports || []).map(p => `${p.port}${p.nodePort && s.spec.type !== "ClusterIP" ? ":" + p.nodePort : ""}/${p.protocol || "TCP"}`).join(",") || "<none>"; }
 function externaTxt(s){ if (s.spec.type !== "LoadBalancer") return "<none>"; const i = ((s.status || {}).loadBalancer || {}).ingress; return i && i.length ? i[0].hostname : "<pending>"; }
 const FILAS = {
   Pod: {cab:["NAME","READY","STATUS","RESTARTS","AGE"], wide:["IP","NODE","NOMINATED NODE","READINESS GATES"],
-        fila:p => [p.name, `${p.listo ? 1 : 0}/1`, p.estado, reiniciosTxt(p), edad(p.creado)], filaW:p => [p.ip || "<none>", p.node || "<none>", "<none>", "<none>"]},
+        fila:p => [p.name, `${p.listos ? p.listos.filter(Boolean).length : (p.listo ? 1 : 0)}/${(p.spec.containers || []).length || 1}`, p.estado, reiniciosTxt(p), edad(p.creado)], filaW:p => [p.ip || "<none>", p.node || "<none>", "<none>", "<none>"]},
   Node: {cab:["NAME","STATUS","ROLES","AGE","VERSION"], wide:["INTERNAL-IP","EXTERNAL-IP","OS-IMAGE","KERNEL-VERSION","CONTAINER-RUNTIME"],
         fila:n => [n.name, (n.ready ? "Ready" : "NotReady") + (n.unsched ? ",SchedulingDisabled" : ""), "<none>", edad(n.creado), K8S_VER], filaW:n => [n.ip, "3.252." + (hash(n.name) % 250) + "." + (hash(n.id) % 250), "Amazon Linux 2023.12.20261118", "6.18.62-127.179.amzn2023.x86_64", "containerd://2.3.7+unknown"]},
   Namespace: {cab:["NAME","STATUS","AGE"], fila:x => [x.name, "Active", edad(x.creado)]},
@@ -194,6 +195,14 @@ function initTxt(p){
     return `\n  ${ic.name}:\n    Image:          ${ic.image}${cmd.length ? "\n    Command:\n" + cmd.map(a => "      " + a).join("\n") : ""}\n    State:          ${st}\n    Ready:          ${hecho}\n    Restart Count:  ${roto ? p.reinicios : 0}${envTxt(ic, p.ns)}`;
   }).join("");
 }
+function ladosTxt(p){
+  return (p.spec.containers || []).slice(1).map((sc, k) => {
+    const l = (p.lados || [])[k]; const cmd = [...(sc.command || []), ...(sc.args || [])];
+    const est = !l ? "Waiting\n      Reason:       ContainerCreating" : l.estado === "Running" ? `Running\n      Started:      ${new Date(Date.now() - (ahora() - (p.arranque || p.creado)) * 1000).toUTCString()}` : "Waiting\n      Reason:       CrashLoopBackOff";
+    const ult = l && l.ultimo ? `\n    Last State:     Terminated\n      Reason:       ${l.ultimo.razon}${l.ultimo.msg ? "\n      Message:      " + l.ultimo.msg : ""}\n      Exit Code:    ${l.ultimo.codigo}` : "";
+    return `  ${sc.name}:\n    Image:          ${sc.image}\n    Port:           ${(sc.ports || []).map(x => `${x.containerPort}/${x.protocol || "TCP"}`).join(", ") || "<none>"}${cmd.length ? "\n    Command:\n" + cmd.map(a => "      " + a).join("\n") : ""}\n    State:          ${est}${ult}\n    Ready:          ${!!(p.listos && p.listos[k + 1])}\n    Restart Count:  ${(l && l.reinicios) || 0}${recursosTxt(sc, "    ")}${sondaTxt("Readiness", sc.readinessProbe)}${envTxt(sc, p.ns)}\n    Mounts:${(sc.volumeMounts || []).map(m => `\n      ${m.mountPath} from ${m.name} (${m.readOnly ? "ro" : "rw"})`).join("") || " <none>"}\n`;
+  }).join("");
+}
 function describir(kind, x){
   if (kind === "Pod"){
     const p = x, c = p.spec.containers[0]; const n = S.nodes.find(z => z.name === p.node);
@@ -224,7 +233,7 @@ Containers:
     Ready:          ${!!p.listo}
     Restart Count:  ${p.reinicios || 0}${recursosTxt(c, "    ")}${sondaTxt("Liveness", c.livenessProbe)}${sondaTxt("Readiness", c.readinessProbe)}${envTxt(c, p.ns)}
     Mounts:${montaToken(p) ? "\n      /var/run/secrets/kubernetes.io/serviceaccount from kube-api-access (ro)" : ""}${podIdentityDe(p) ? "\n      /var/run/secrets/pods.eks.amazonaws.com/serviceaccount from eks-pod-identity-token (ro)" : ""}${(c.volumeMounts || []).map(m => `\n      ${m.mountPath} from ${m.name} (${m.readOnly ? "ro" : "rw"})`).join("")}
-Conditions:
+${ladosTxt(p)}Conditions:
   Type              Status
   PodScheduled      ${p.node ? "True" : "False"}
   Ready             ${p.listo ? "True" : "False"}

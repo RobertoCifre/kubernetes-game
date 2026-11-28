@@ -1,5 +1,5 @@
 /* ============================================================================
-   niveles.js — los 66 niveles (misma especificación que docs/NIVELES.md)
+   niveles.js — los 76 niveles (misma especificación que docs/NIVELES.md)
    ========================================================================== */
 "use strict";
 
@@ -26,6 +26,7 @@ function mkDep(ns, nombre, o){
   if (o.sa) spec.serviceAccountName = o.sa;
   if (o.automount !== undefined) spec.automountServiceAccountToken = o.automount;
   if (o.inits) spec.initContainers = o.inits;
+  if (o.extra) spec.containers.push(...o.extra);
   return guardarObj({apiVersion:"apps/v1", kind:"Deployment", metadata:metaNueva(nombre, ns, {labels:{app:nombre}, annotations:Object.assign({}, o.anot || {})}),
     spec:{replicas:o.replicas === undefined ? 1 : o.replicas, selector:{matchLabels:{app:nombre}}, template:{metadata:{labels}, spec}}});
 }
@@ -48,7 +49,7 @@ function asegurarNodos(k){
 const SCRIPT_PROCESADOR = 'if [ "$MODO" != "normal" ] && [ "$MODO" != "debug" ]; then echo "ERROR: falta la variable de entorno MODO (valores válidos: normal o debug)"; exit 1; fi; echo "Procesador arrancado en modo $MODO"; sleep 3600';
 const SONDA_WGET_API = {exec:{command:["sh","-c",'wget -qO- -T 2 "$API_URL" > /dev/null']}, periodSeconds:5, timeoutSeconds:3};
 
-const MUNDOS = ["Primeros pasos","Pods que no arrancan","Tráfico y salud","Actualizaciones y configuración","Capacidad y escalado","Seguridad y permisos","Guardia","Bajo el capó"];
+const MUNDOS = ["Primeros pasos","Pods que no arrancan","Tráfico y salud","Actualizaciones y configuración","Capacidad y escalado","Seguridad y permisos","Guardia","Bajo el capó","Redes y Pods por dentro","Examen final"];
 
 /* ---------- los niveles ---------- */
 const NIVELES = [null,
@@ -563,12 +564,131 @@ const NIVELES = [null,
   p:["De fuera adentro: kubectl get pods -n nivel-66  → ¿Init? ¿Config? ¿0/1?  Y kubectl logs <pod> -c espera-cola -n nivel-66","Cuando pase el init: kubectl describe pod … → ¿falta un Secret? (créalo: kubectl create secret generic …)","Al final: Running pero 0/1 → la readiness. ¿Responde nginx en /healthz? (kubectl exec … -- wget -qO- http://localhost:8080/healthz)"],
   a:"Los fallos vienen en capas: el init container tapa el Secret que falta, y el Secret tapa la sonda mal puesta. Método: arregla el primero, MIRA otra vez, y sigue. Y en un namespace «restricted» la solución nunca es quitar la seguridad.",
   sol:"kubectl logs deploy/pedidos -c espera-cola -n nivel-66\nkubectl expose deployment cola --port=8080 -n nivel-66\nkubectl create secret generic cola-cred --from-literal=password=s3cret0 -n nivel-66\nkubectl patch deployment pedidos -n nivel-66 --type=json -p '[{\"op\":\"replace\",\"path\":\"/spec/template/spec/containers/0/readinessProbe/httpGet/path\",\"value\":\"/\"}]'" },
+/* ===================== MUNDO 9 · Redes y Pods por dentro ===================== */
+{ id:67, mundo:9, t:"Cada Pod tiene su IP", tipo:"pregunta",
+  m:"En EKS cada Pod recibe una IP REAL de la VPC (la pone la VPC CNI).\n¿Qué IP tiene el Pod del Deployment «eco» (nivel-67)?\n\nResponde:  responder <ip>",
+  prep(){ mkNs("nivel-67"); mkDep("nivel-67","eco",{ports:[{containerPort:80}]}); },
+  resp:() => (S.pods.find(p => p.ns === "nivel-67" && p.labels.app === "eco" && !p.borrando) || {}).ip || "",
+  p:["kubectl get pods -n nivel-67 -o wide   → columna IP","Desde dentro también: kubectl exec deploy/eco -n nivel-67 -- hostname -i","Es una IP de la subnet del nodo (10.0.x.x), no del rango de los Services (172.20.x.x)"],
+  a:"Cada Pod tiene su propia IP y todos los Pods se ven entre sí sin NAT. La VPC CNI les da IPs de la VPC (por eso el máximo de Pods por nodo depende de las ENIs). Los Services usan otro rango (172.20.0.0/16): son IPs virtuales.",
+  sol:"kubectl get pods -n nivel-67 -o wide\nresponder <la IP que salga>" },
+{ id:68, mundo:9, t:"¿Quién recibe tráfico de verdad?", tipo:"pregunta",
+  m:"El Service «tienda» (nivel-68) elige Pods con la etiqueta rol=tienda: hay 3.\n¿A cuántos les está mandando tráfico AHORA MISMO?\n\nResponde:  responder <número>",
+  prep(){ mkNs("nivel-68");
+          mkDep("nivel-68","tienda-a",{replicas:2, labels:{rol:"tienda"}, ports:[{containerPort:80}]});
+          mkDep("nivel-68","tienda-b",{labels:{rol:"tienda"}, ports:[{containerPort:80}], readiness:{httpGet:{path:"/salud", port:80}, periodSeconds:5}});
+          mkSvc("nivel-68","tienda",{selector:{rol:"tienda"}}); },
+  resp:() => "2",
+  p:["kubectl get endpoints tienda -n nivel-68   (o: kubectl get endpointslices -n nivel-68)","Compara con kubectl get pods -n nivel-68 -l rol=tienda: ¿están todos READY?","Un Pod que no pasa su readiness sale de los endpoints"],
+  a:"Un Service solo manda tráfico a los Pods LISTOS que encajan con su selector: esa lista son los endpoints (EndpointSlices). Si la readiness falla, el Pod sigue vivo pero sale de la lista. kube-proxy convierte esa lista en reglas del nodo.",
+  sol:"kubectl get endpoints tienda -n nivel-68\nresponder 2" },
+{ id:69, mundo:9, t:"¿Quién contesta al DNS?", tipo:"pregunta",
+  m:"Cuando un Pod pregunta «¿qué IP tiene el Service api?», alguien contesta.\nMira la configuración DNS DENTRO de un Pod de «cliente» (nivel-69) y averigua:\n¿cómo se llama el Service que hay detrás de ese servidor DNS?\n\nResponde:  responder <nombre-del-service>",
+  prep(){ mkNs("nivel-69"); mkDep("nivel-69","cliente",{image:"busybox:1.37", cmd:["sleep","3600"]}); },
+  resp:() => "kube-dns",
+  p:["kubectl exec deploy/cliente -n nivel-69 -- cat /etc/resolv.conf   → nameserver","Busca esa IP entre los Services de TODOS los namespaces: kubectl get svc -A","Fíjate también en «search» y «ndots:5»: por eso los nombres cortos funcionan"],
+  a:"Cada Pod tiene en /etc/resolv.conf la IP del Service kube-dns (kube-system), que reparte las preguntas entre los Pods de CoreDNS. «search» añade <ns>.svc.cluster.local, svc.cluster.local… y ndots:5 hace que los nombres con menos de 5 puntos se prueben primero con esos sufijos.",
+  sol:"kubectl exec deploy/cliente -n nivel-69 -- cat /etc/resolv.conf\nkubectl get svc -A | grep 172.20.0.10\nresponder kube-dns" },
+{ id:70, mundo:9, t:"Dos contenedores, una red", tipo:"mision",
+  m:"El Pod de «web» (nivel-70) tiene DOS contenedores: nginx («app») y un sidecar («vigia»)\nque comprueba que la app responde. El Pod se queda en 1/2.\n\nHaz que quede 2/2 sin quitar el sidecar ni su sonda.",
+  prep(){ mkNs("nivel-70");
+          mkDep("nivel-70","web",{cname:"app", ports:[{containerPort:80}],
+            extra:[{name:"vigia", image:"busybox:1.37", env:[{name:"DESTINO", value:"http://localhost:8080"}],
+                    command:["sh","-c","while true; do if wget -qO- -T 2 $DESTINO >/dev/null; then echo OK $DESTINO; else echo FALLO $DESTINO; fi; sleep 5; done"],
+                    readinessProbe:{exec:{command:["sh","-c","wget -qO- -T 1 $DESTINO"]}, periodSeconds:5}}]}); },
+  ok:() => { const d = dObj("nivel-70","web"); const v = d && d.spec.template.spec.containers.find(c => c.name === "vigia");
+             return !!v && !!v.readinessProbe && listos("nivel-70","web") === 1; },
+  p:["kubectl get pods -n nivel-70  → READY 1/2: ¿qué contenedor no está listo? (kubectl describe pod …)","Lee lo que dice el sidecar: kubectl logs deploy/web -c vigia -n nivel-70","Los contenedores de un Pod comparten red: el sidecar llega a nginx por localhost… pero ¿por qué puerto escucha nginx? Cambia la variable del sidecar: kubectl set env deployment/web -c vigia …"],
+  a:"Todos los contenedores de un Pod comparten la red (el «network namespace» del contenedor pause): se hablan por localhost y no pueden usar el mismo puerto. READY x/y cuenta contenedores: el Pod solo recibe tráfico si están listos TODOS.",
+  sol:"kubectl logs deploy/web -c vigia -n nivel-70\nkubectl set env deployment/web -c vigia DESTINO=http://localhost:80 -n nivel-70" },
+{ id:71, mundo:9, t:"Procesos compartidos", tipo:"pregunta",
+  m:"El Pod de «par» (nivel-71) tiene shareProcessNamespace: true y dos contenedores: «app» (nginx) y «consola» (busybox).\nEntra en «consola»: ¿cuántos procesos de nginx ves (el master más los workers)?\n\nResponde:  responder <número>",
+  prep(){ mkNs("nivel-71");
+          const d = mkDep("nivel-71","par",{cname:"app", extra:[{name:"consola", image:"busybox:1.37", command:["sleep","3600"]}]});
+          d.spec.template.spec.shareProcessNamespace = true; },
+  resp:() => "3",
+  p:["kubectl exec -it deploy/par -c consola -n nivel-71 -- sh","Dentro: ps   → ¿qué es el PID 1? ¿y los procesos nginx?","Sin shareProcessNamespace, cada contenedor solo vería sus propios procesos"],
+  a:"Con shareProcessNamespace todos los contenedores del Pod comparten un único espacio de procesos: el PID 1 pasa a ser /pause y cada contenedor ve (y puede mandar señales a) los procesos de los demás. Útil para sidecars de depuración o para recargar la configuración de otro proceso.",
+  sol:"kubectl exec -it deploy/par -c consola -n nivel-71 -- sh\nps\nexit\nresponder 3" },
+{ id:72, mundo:9, t:"¿A quién mata primero el kernel?", tipo:"pregunta",
+  m:"Si un nodo se queda sin memoria, el kernel mata procesos según su oom_score_adj (el kubelet lo fija según la QoS).\nEn nivel-72 hay tres Deployments: «oro», «plata» y «bronce».\n¿Cuál tiene el oom_score_adj MÁS ALTO (será el primero en morir)?\n\nResponde:  responder <nombre>",
+  prep(){ mkNs("nivel-72");
+          mkDep("nivel-72","oro",{image:"busybox:1.37", cmd:["sleep","3600"], req:{cpu:"100m", memory:"128Mi"}, lim:{cpu:"100m", memory:"128Mi"}});
+          mkDep("nivel-72","plata",{image:"busybox:1.37", cmd:["sleep","3600"], req:{memory:"64Mi"}});
+          mkDep("nivel-72","bronce",{image:"busybox:1.37", cmd:["sleep","3600"]}); },
+  resp:() => "bronce", acepta:v => /^bronce$/i.test(String(v).trim()),
+  p:["kubectl exec deploy/oro -n nivel-72 -- cat /proc/1/oom_score_adj   (y lo mismo con plata y bronce)","Compara con la QoS: kubectl get pods -n nivel-72 -o custom-columns=NAME:.metadata.name,QOS:.status.qosClass","Guaranteed = -997 (casi intocable) · BestEffort = 1000 (el primero en caer)"],
+  a:"El kubelet escribe oom_score_adj según la QoS: Guaranteed −997, BestEffort 1000, y Burstable entre 2 y 999 (cuanta más memoria pide, más bajo). Por eso poner requests no es burocracia: decide quién sobrevive cuando falta memoria.",
+  sol:"kubectl exec deploy/bronce -n nivel-72 -- cat /proc/1/oom_score_adj\n(oro: -997 · plata: ~984 · bronce: 1000)\nresponder bronce" },
+{ id:73, mundo:9, t:"Del contenedor al proceso del nodo", tipo:"pregunta",
+  m:"Un contenedor es un proceso del nodo con otro PID «por fuera».\n¿Qué PID tiene EN EL NODO el proceso principal del contenedor «rastro» (nivel-73)?\n\nResponde:  responder <pid>",
+  prep(){ mkNs("nivel-73"); mkDep("nivel-73","rastro"); },
+  resp:() => { const p = S.pods.find(x => x.ns === "nivel-73" && x.labels.app === "rastro" && !x.borrando); return p ? String(pidNodo(p, "rastro")) : ""; },
+  p:["¿En qué nodo está? kubectl get pods -n nivel-73 -o wide","Entra al nodo: kubectl debug node/<nodo> -it --image=busybox:1.37   y ahí: crictl ps --name rastro","crictl inspect <CONTAINER-ID> | grep pid"],
+  a:"crictl habla con containerd: ps (contenedores), pods (sandboxes), inspect (detalles, incluido el PID en el nodo y la ruta del cgroup). Dentro del contenedor ese proceso es el PID 1; fuera es un PID cualquiera: es el PID namespace.",
+  sol:"kubectl get pods -n nivel-73 -o wide\nkubectl debug node/<nodo> -it --image=busybox:1.37\ncrictl ps --name rastro\ncrictl inspect <id> | grep pid\nexit\nresponder <pid>" },
+{ id:74, mundo:9, t:"El cgroup del Pod, desde el nodo", tipo:"pregunta",
+  m:"Dentro del contenedor, su cgroup parece la raíz (/). Desde el nodo se ve dónde lo ha colgado el kubelet.\n¿En qué rama de QoS está el cgroup del contenedor «medido» (nivel-74): guaranteed, burstable o besteffort?\n\nResponde:  responder <qos>",
+  prep(){ mkNs("nivel-74"); mkDep("nivel-74","medido",{req:{memory:"64Mi"}}); },
+  resp:() => "burstable", acepta:v => /^(kubepods-)?burstable(\.slice)?$/i.test(String(v).trim()),
+  p:["Compruébalo dentro: kubectl exec deploy/medido -n nivel-74 -- cat /proc/self/cgroup   → «0::/» (namespace de cgroup)","En el nodo: crictl ps --name medido · crictl inspect <id> | grep pid","cat /proc/<pid>/cgroup   → /kubepods.slice/kubepods-<qos>.slice/…"],
+  a:"El kubelet organiza los cgroups por QoS: kubepods.slice/ (Guaranteed directamente), kubepods-burstable.slice/ y kubepods-besteffort.slice/. Dentro cuelga un slice por Pod (con su UID) y un scope por contenedor. Desde dentro no se ve: el contenedor tiene su propio namespace de cgroup.",
+  sol:"kubectl debug node/<nodo> -it --image=busybox:1.37\ncrictl ps --name medido\ncrictl inspect <id> | grep pid\ncat /proc/<pid>/cgroup\nexit\nresponder burstable" },
+{ id:75, mundo:9, t:"Las tripas de un Service", tipo:"pregunta",
+  m:"Un Service no es un proceso: kube-proxy lo convierte en reglas de iptables en cada nodo.\n¿A qué IP:PUERTO reenvían esas reglas el tráfico del Service «pagos» (nivel-75)?\n\nResponde:  responder <ip>:<puerto>",
+  prep(){ mkNs("nivel-75"); mkDep("nivel-75","pagos",{image:"nginxinc/nginx-unprivileged:1.28-alpine", ports:[{containerPort:8080}]}); mkSvc("nivel-75","pagos",{port:80, targetPort:8080}); },
+  resp:() => { const p = S.pods.find(x => x.ns === "nivel-75" && x.labels.app === "pagos" && !x.borrando); return p ? `${p.ip}:8080` : ""; },
+  p:["Entra a un nodo: kubectl debug node/<nodo> -it --image=busybox:1.37","iptables-save | grep pagos   → busca la regla DNAT","--to-destination <IP del Pod>:<targetPort>  (compáralo con kubectl get endpoints pagos -n nivel-75)"],
+  a:"kube-proxy (modo iptables) crea por cada Service una cadena KUBE-SVC-… que reparte al azar (statistic --probability) entre cadenas KUBE-SEP-…, una por endpoint, que hacen DNAT a IP-del-Pod:targetPort. La IP del Service no está en ninguna interfaz: solo existe en estas reglas.",
+  sol:"kubectl debug node/<nodo> -it --image=busybox:1.37\niptables-save | grep pagos\nexit\nresponder <ip-del-pod>:8080" },
+/* ===================== MUNDO 10 · Examen final ===================== */
+{ id:76, mundo:10, t:"EXAMEN FINAL: laboratorio estilo CKA", tipo:"mision", tareas:true,
+  m:"🎓 Seis tareas INDEPENDIENTES, como en el examen CKA. Cada una puntúa por separado: con 4 de 6 (66 %) apruebas,\ny puedes seguir mejorando nota. Escribe «comprobar» para ver cuáles llevas.\n\n1. RBAC · Crea el ClusterRole «deployment-clusterrole» que SOLO permita CREAR Deployments, StatefulSets y DaemonSets.\n   Crea la ServiceAccount «cicd-token» en el namespace app-team1 y dale ese ClusterRole, pero solo en app-team1.\n2. Mantenimiento · Marca el nodo indicado abajo como no disponible y desaloja sus Pods.\n3. NetworkPolicy · En el namespace fubar crea «allow-port-from-namespace»: que los Pods del namespace internal\n   puedan conectar al puerto 9000 de los Pods de fubar, y nadie más.\n4. Exponer · En nivel-76, haz que el contenedor de «front-end» declare el puerto 80/TCP con nombre «http»\n   y crea el Service «front-end-svc», tipo NodePort, que apunte a ese puerto con nombre.\n5. Sidecar · En nivel-76, añade a «legacy-app» un contenedor «sidecar» (busybox:1.37) que ejecute\n   /bin/sh -c 'tail -n+1 -f /var/log/legacy-app.log' y monte el volumen «logs» en /var/log,\n   para que kubectl logs … -c sidecar muestre el log de la aplicación.\n6. Nodo caído · Un nodo está NotReady. Averigua por qué y déjalo Ready.",
+  prep(){
+    asegurarNodos(3);
+    const nodos = S.nodes.slice().sort((a, b) => a.name.localeCompare(b.name));
+    const [nA, nB, nC] = nodos; S.datos.cka = {drenar:nB.name, roto:nC.name};
+    nC.roto = true; nC.ready = false; nC.rotoDesde = ahora() - 60;
+    mkNs("app-team1"); mkNs("fubar"); mkNs("internal"); mkNs("nivel-76");
+    mkDep("fubar","datos",{ports:[{containerPort:9000}]});
+    mkDep("internal","informes",{image:"busybox:1.37", cmd:["sleep","3600"]});
+    mkDep("nivel-76","front-end",{cname:"nginx", replicas:2});
+    mkDep("nivel-76","legacy-app",{image:"busybox:1.37", cname:"app",
+      cmd:["sh","-c","while true; do echo \"INFO procesado pedido\" >> /var/log/legacy-app.log; sleep 2; done"],
+      volumes:[{name:"logs", emptyDir:{}}], mounts:[{name:"logs", mountPath:"/var/log"}]});
+    mkDep("nivel-76","lotes",{image:"busybox:1.37", cmd:["sleep","3600"], replicas:2, nodeSelector:{"kubernetes.io/hostname":nB.name}});
+  },
+  trasMision(){ const c = S.datos.cka; if (c) out(`📌 Tarea 2: el nodo a desalojar es  ${c.drenar}`, "c-cian"); },
+  tareas:[
+    {t:"RBAC: deployment-clusterrole + cicd-token solo en app-team1", ok:() => { const sa = "system:serviceaccount:app-team1:cicd-token";
+      const cr = S.objs.find(o => o.kind === "ClusterRole" && o.metadata.name === "deployment-clusterrole");
+      return !!cr && !!obj("ServiceAccount","app-team1","cicd-token") && puede(sa,"create","deployments","app-team1") && puede(sa,"create","statefulsets","app-team1") && puede(sa,"create","daemonsets","app-team1")
+        && !puede(sa,"create","deployments","default") && !puede(sa,"delete","deployments","app-team1") && !puede(sa,"list","pods","app-team1") && !puede(sa,"create","pods","app-team1"); }},
+    {t:"Mantenimiento: el nodo marcado como no disponible y sin Pods de aplicación", ok:() => { const n = S.nodes.find(x => x.name === (S.datos.cka || {}).drenar);
+      return !!n && n.unsched && !S.pods.some(p => p.node === n.name && !p.borrando && !(p.owner && p.owner.kind === "DaemonSet")); }},
+    {t:"NetworkPolicy allow-port-from-namespace en fubar (internal → puerto 9000)", ok:() => { const np = obj("NetworkPolicy","fubar","allow-port-from-namespace"); if (!np) return false;
+      const reglas = (np.spec && np.spec.ingress) || []; const puerto9000 = reglas.length > 0 && reglas.every(r => (r.ports || []).some(pt => String(pt.port) === "9000"));
+      const dst = S.pods.find(p => p.ns === "fubar" && p.labels.app === "datos"); const ok1 = S.pods.find(p => p.ns === "internal"); const malo = S.pods.find(p => p.ns === "nivel-76");
+      return puerto9000 && !!dst && !!ok1 && !!malo && permiteRed(ok1, dst) && !permiteRed(malo, dst); }},
+    {t:"front-end con puerto «http» y Service front-end-svc NodePort", ok:() => { const d = dObj("nivel-76","front-end"); const s = obj("Service","nivel-76","front-end-svc");
+      const c = d && d.spec.template.spec.containers[0]; const pto = c && (c.ports || []).find(x => x.name === "http" && x.containerPort === 80 && (x.protocol || "TCP") === "TCP");
+      return !!pto && !!s && s.spec.type === "NodePort" && (s.spec.ports || []).some(x => String(x.targetPort) === "http" || x.targetPort === 80) && eps("nivel-76","front-end-svc") > 0; }},
+    {t:"Sidecar de logs en legacy-app (kubectl logs -c sidecar muestra el log)", ok:() => { const d = dObj("nivel-76","legacy-app"); const sc = d && d.spec.template.spec.containers.find(c => c.name === "sidecar");
+      if (!sc || !(sc.volumeMounts || []).some(m => m.name === "logs" && m.mountPath === "/var/log")) return false;
+      const p = S.pods.find(x => x.ns === "nivel-76" && x.labels.app === "legacy-app" && x.listo && !x.borrando); const pr = procContenedor(p, "sidecar");
+      return !!pr && lineasLog(p, pr).some(x => /INFO procesado pedido/.test(x)); }},
+    {t:"Nodo NotReady arreglado (vuelve a Ready)", ok:() => { const n = S.nodes.find(x => x.name === (S.datos.cka || {}).roto); return !!n && n.ready && !n.roto; }},
+  ],
+  ok(){ return pctTareas(this) >= 66; },
+  p:["Ve tarea a tarea y escribe «comprobar» para ver cuáles llevas. Si una se atasca, pasa a otra: son independientes","RBAC: kubectl create clusterrole … --verb=create --resource=deployments,statefulsets,daemonsets · NetworkPolicy: namespaceSelector con kubernetes.io/metadata.name=internal y ports 9000 · Exponer: kubectl edit deployment front-end (ports: name http) y kubectl expose … --type=NodePort --target-port=http","Sidecar: kubectl edit deployment legacy-app (añade el contenedor con su volumeMount) · Nodo: kubectl describe node → kubelet; entra con kubectl debug node/<nodo> o aws ssm start-session y mira systemctl status kubelet · Drain: kubectl drain <nodo> --ignore-daemonsets --delete-emptydir-data"],
+  a:"El examen CKA es práctico, contra reloj y con varias tareas independientes en distintos namespaces y clusters. La clave es no atascarse: lee bien el namespace de cada tarea, compruébala con get/describe/auth can-i y pasa a la siguiente.",
+  sol:"# 1 RBAC\nkubectl create clusterrole deployment-clusterrole --verb=create --resource=deployments,statefulsets,daemonsets\nkubectl create serviceaccount cicd-token -n app-team1\nkubectl create rolebinding cicd-token-binding --clusterrole=deployment-clusterrole --serviceaccount=app-team1:cicd-token -n app-team1\n# 2 Mantenimiento (el nodo que te indica el nivel)\nkubectl drain <nodo> --ignore-daemonsets --delete-emptydir-data\n# 3 NetworkPolicy\nkubectl apply -f -   (spec: podSelector: {} · policyTypes: [Ingress] · ingress: from namespaceSelector kubernetes.io/metadata.name: internal · ports: [{protocol: TCP, port: 9000}])\n# 4 Exponer\nkubectl patch deployment front-end -n nivel-76 --type=json -p '[{\"op\":\"add\",\"path\":\"/spec/template/spec/containers/0/ports\",\"value\":[{\"name\":\"http\",\"containerPort\":80,\"protocol\":\"TCP\"}]}]'\nkubectl expose deployment front-end --name=front-end-svc --port=80 --target-port=http --type=NodePort -n nivel-76\n# 5 Sidecar\nkubectl edit deployment legacy-app -n nivel-76   (añade el contenedor sidecar con volumeMounts: [{name: logs, mountPath: /var/log}])\n# 6 Nodo caído\nkubectl get nodes   → el NotReady\nkubectl debug node/<nodo> -it --image=busybox:1.37   (o aws ssm start-session)\nsystemctl status kubelet\nsystemctl start kubelet\nexit" },
 ];
 const MAX = NIVELES.length - 1;
 
 /* estado base antes de cada nivel */
 function estadoBase(){
-  for (const n of Object.keys(S.ns)) if (/^nivel-\d+/.test(n) || n === "mi-equipo") borrarNamespace(n);
+  for (const n of Object.keys(S.ns)) if (/^nivel-\d+/.test(n) || ["mi-equipo","app-team1","fubar","internal"].includes(n)) borrarNamespace(n);
   for (const n of S.nodes.slice()){
     n.unsched = false; n.taints = n.taints.filter(t => t.key !== "mantenimiento"); delete n.extra.hardware;
     if (n.roto || n.terminando){ S.nodes = S.nodes.filter(x => x !== n); S.pods = S.pods.filter(p => p.node !== n.name); S.nodes.push(nuevoNodo(n.az)); }

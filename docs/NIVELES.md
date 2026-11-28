@@ -1,4 +1,4 @@
-# EKS Quest — los 66 niveles (especificación y solucionario)
+# EKS Quest — los 76 niveles (especificación y solucionario)
 
 > ⚠️ **SPOILERS.** Este documento tiene las soluciones. Úsalo solo cuando te atasques de verdad, o para repasar después de jugar.
 > Es también la **especificación** del juego del navegador (`eks-quest.html`): mismos niveles, mismos nombres, mismas comprobaciones. Las soluciones usan comandos reales de `kubectl` y `aws`, así que casi todas valen igual en un cluster de verdad (los avisos «⚠️ En EKS real» dicen dónde cambia algo).
@@ -10,7 +10,7 @@
   - nodos sin cordon;
   - sin los taints ni las labels del juego (`mantenimiento`, `hardware`);
   - CoreDNS con 2 réplicas.
-- **Puntos:** 100 XP por nivel. Cada pista resta 20. Ver la solución deja el nivel en 0 XP. Repetir un nivel no suma dos veces. Máximo: 6.600 XP. Los niveles se desbloquean en orden: para jugar uno hay que haber superado el anterior (ver la solución no cuenta como superarlo).
+- **Puntos:** 100 XP por nivel. Cada pista resta 20. Ver la solución deja el nivel en 0 XP. Repetir un nivel no suma dos veces. Máximo: 7.600 XP. Los niveles se desbloquean en orden: para jugar uno hay que haber superado el anterior (ver la solución no cuenta como superarlo).
 - **Rangos por XP:**
 
   | Rango | Desde |
@@ -22,6 +22,7 @@
   | 🚒 SRE de guardia | 3.300 |
   | 🔬 Cirujano de contenedores | 4.600 |
   | 👑 Maestro EKS | 6.000 |
+  | 🎓 Listo para la CKA | 7.300 |
 
   Al cruzar cada umbral, el juego avisa del ascenso y dice cuántos XP faltan para el siguiente (también con `rango`).
 - **Tipos de nivel:**
@@ -1002,3 +1003,138 @@ Aquí se abre el contenedor: procesos, cgroups, capabilities, el token de la Ser
   2. Cuando pase el init: `describe pod` → ¿falta un Secret?
   3. Al final, `Running 0/1`: la readiness. ¿Responde nginx en `/healthz`?
 - **Aprendes:** los fallos vienen en capas: el init tapa el Secret, y el Secret tapa la sonda. Arregla uno, mira otra vez, sigue. Y en `restricted` la solución nunca es quitar la seguridad.
+
+---
+
+## MUNDO 9 · Redes y Pods por dentro
+
+Cómo se comunican los Pods y qué hay debajo: IPs de Pod, endpoints, DNS, sidecars que comparten red y ficheros, procesos compartidos, OOM, y el nodo visto por dentro (crictl, cgroups, kube-proxy). Chuletas: `CHULETA-BAJO-EL-CAPO.md` (secciones 8-10) y `CHULETA-RED.md`.
+
+### 67 · Cada Pod tiene su IP · *pregunta*
+- **Preparación:** Deployment `eco` (nginx).
+- **Misión:** ¿Qué IP tiene el Pod de `eco`?
+- **Respuesta:** la IP del Pod (`kubectl get pods -o wide`); cambia en cada partida.
+- **Solución:** `kubectl get pods -n nivel-67 -o wide`
+- **Aprendes:** cada Pod tiene una IP real de la VPC (VPC CNI); los Services usan otro rango (172.20.0.0/16) de IPs virtuales.
+
+### 68 · ¿Quién recibe tráfico de verdad? · *pregunta*
+- **Preparación:** Deployments `tienda-a` (2 réplicas) y `tienda-b` (1 réplica, readiness en `/salud` que falla), todos con `rol=tienda`; Service `tienda` con selector `rol=tienda`.
+- **Respuesta:** `2`
+- **Solución:** `kubectl get endpoints tienda -n nivel-68`
+- **Aprendes:** un Service solo manda tráfico a los Pods LISTOS; si la readiness falla, el Pod sale de los endpoints.
+
+### 69 · ¿Quién contesta al DNS? · *pregunta*
+- **Preparación:** Deployment `cliente` (busybox).
+- **Misión:** mira `/etc/resolv.conf` dentro de un Pod: ¿cómo se llama el Service que hay detrás del `nameserver`?
+- **Respuesta:** `kube-dns`
+- **Solución:** `kubectl exec deploy/cliente -n nivel-69 -- cat /etc/resolv.conf` (nameserver 172.20.0.10) y `kubectl get svc -A | grep 172.20.0.10`.
+- **Aprendes:** el DNS de los Pods es el Service `kube-dns` (kube-system), delante de CoreDNS; `search` y `ndots:5` explican por qué funcionan los nombres cortos.
+
+### 70 · Dos contenedores, una red · *misión*
+- **Preparación:** Deployment `web` con dos contenedores: `app` (nginx en el 80) y el sidecar `vigia` (busybox), que comprueba `$DESTINO` (`http://localhost:8080`) en bucle y en su readiness.
+- **Misión:** el Pod se queda en 1/2. Déjalo 2/2 sin quitar el sidecar ni su sonda.
+- **Se supera cuando:** `web` está listo (2/2) y `vigia` conserva su readinessProbe.
+- **Solución:**
+  ```bash
+  kubectl logs deploy/web -c vigia -n nivel-70
+  kubectl set env deployment/web -c vigia DESTINO=http://localhost:80 -n nivel-70
+  ```
+- **Trampas:** quitar el sidecar o su sonda no vale; `set env` sin `-c` cambia el contenedor `app`, no el sidecar.
+- **Aprendes:** los contenedores de un Pod comparten red (se hablan por `localhost`); READY x/y cuenta contenedores.
+
+### 71 · Procesos compartidos · *pregunta*
+- **Preparación:** Deployment `par` con `shareProcessNamespace: true` y dos contenedores: `app` (nginx) y `consola` (busybox).
+- **Misión:** entra en `consola`: ¿cuántos procesos de nginx ves (master + workers)?
+- **Respuesta:** `3`
+- **Solución:** `kubectl exec -it deploy/par -c consola -n nivel-71 -- sh` → `ps`.
+- **Aprendes:** con `shareProcessNamespace` el PID 1 es `/pause` y cada contenedor ve los procesos de los demás.
+
+### 72 · ¿A quién mata primero el kernel? · *pregunta*
+- **Preparación:** Deployments `oro` (Guaranteed), `plata` (Burstable: solo requests de memoria) y `bronce` (BestEffort).
+- **Misión:** ¿cuál tiene el `oom_score_adj` más alto?
+- **Respuesta:** `bronce`
+- **Solución:** `kubectl exec deploy/<nombre> -n nivel-72 -- cat /proc/1/oom_score_adj` en los tres (−997, entre 2 y 999, 1000).
+- **Aprendes:** el kubelet fija `oom_score_adj` según la QoS; con poca memoria en el nodo, el kernel mata primero a los BestEffort.
+
+### 73 · Del contenedor al proceso del nodo · *pregunta*
+- **Preparación:** Deployment `rastro` (nginx).
+- **Misión:** ¿qué PID tiene EN EL NODO el proceso principal del contenedor `rastro`?
+- **Respuesta:** el PID que da `crictl inspect` (cambia en cada partida).
+- **Solución:**
+  ```bash
+  kubectl get pods -n nivel-73 -o wide
+  kubectl debug node/<nodo> -it --image=busybox:1.37
+  crictl ps --name rastro
+  crictl inspect <id> | grep pid
+  ```
+- **Aprendes:** `crictl` habla con containerd; dentro del contenedor el proceso es el PID 1, fuera es otro (PID namespace).
+
+### 74 · El cgroup del Pod, desde el nodo · *pregunta*
+- **Preparación:** Deployment `medido` con `requests.memory` y sin limits (Burstable).
+- **Misión:** ¿en qué rama de QoS está su cgroup?
+- **Respuesta:** `burstable`
+- **Solución:** dentro, `cat /proc/self/cgroup` da `0::/`; en el nodo, `crictl inspect <id> | grep pid` y `cat /proc/<pid>/cgroup` → `/kubepods.slice/kubepods-burstable.slice/kubepods-burstable-pod<uid>.slice/cri-containerd-<id>.scope`.
+- **Aprendes:** el kubelet cuelga los cgroups por QoS y por Pod; desde dentro no se ve (namespace de cgroup).
+
+### 75 · Las tripas de un Service · *pregunta*
+- **Preparación:** Deployment `pagos` (nginx-unprivileged, 8080) y Service `pagos` (port 80 → targetPort 8080).
+- **Misión:** ¿a qué IP:puerto reenvían las reglas de kube-proxy el tráfico del Service?
+- **Respuesta:** `<IP del Pod>:8080`
+- **Solución:** `kubectl debug node/<nodo> -it --image=busybox:1.37` → `iptables-save | grep pagos` → `DNAT --to-destination`.
+- **Aprendes:** kube-proxy convierte cada Service en reglas KUBE-SVC → KUBE-SEP → DNAT; la IP del Service no existe en ninguna interfaz.
+
+---
+
+## MUNDO 10 · Examen final
+
+### 76 · EXAMEN FINAL: laboratorio estilo CKA · *misión por tareas*
+
+Inspirado en las tareas más conocidas de las prácticas públicas de la CKA (no son preguntas reales del examen, que es confidencial). Seis tareas **independientes**: cada una puntúa por separado, se aprueba con 4 de 6 (66 %, como la CKA) y se puede seguir subiendo nota. `comprobar` enseña cuáles llevas. Los XP son proporcionales a la nota.
+
+- **Preparación:** 3 nodos (uno con el kubelet parado, NotReady); namespaces `app-team1`, `fubar` (Deployment `datos`), `internal` (Deployment `informes`) y `nivel-76` (Deployments `front-end`, `legacy-app` —escribe `/var/log/legacy-app.log` en un volumen `logs`— y `lotes`, fijado al nodo a desalojar).
+- **Tareas y solución:**
+  1. **RBAC.**
+     ```bash
+     kubectl create clusterrole deployment-clusterrole --verb=create --resource=deployments,statefulsets,daemonsets
+     kubectl create serviceaccount cicd-token -n app-team1
+     kubectl create rolebinding cicd-token-binding --clusterrole=deployment-clusterrole --serviceaccount=app-team1:cicd-token -n app-team1
+     ```
+     Trampas: un ClusterRoleBinding (vale en todo el cluster) o el ClusterRole `edit` (da de más) no cuentan.
+  2. **Mantenimiento:** `kubectl drain <nodo indicado> --ignore-daemonsets --delete-emptydir-data`. Solo `cordon` no basta.
+  3. **NetworkPolicy** en `fubar`:
+     ```yaml
+     apiVersion: networking.k8s.io/v1
+     kind: NetworkPolicy
+     metadata:
+       name: allow-port-from-namespace
+       namespace: fubar
+     spec:
+       podSelector: {}
+       policyTypes: ["Ingress"]
+       ingress:
+       - from:
+         - namespaceSelector:
+             matchLabels:
+               kubernetes.io/metadata.name: internal
+         ports:
+         - protocol: TCP
+           port: 9000
+     ```
+     Trampas: sin el puerto, o abierta a todos los namespaces, no cuenta.
+  4. **Exponer:**
+     ```bash
+     kubectl patch deployment front-end -n nivel-76 --type=json -p '[{"op":"add","path":"/spec/template/spec/containers/0/ports","value":[{"name":"http","containerPort":80,"protocol":"TCP"}]}]'
+     kubectl expose deployment front-end --name=front-end-svc --port=80 --target-port=http --type=NodePort -n nivel-76
+     ```
+  5. **Sidecar:** `kubectl edit deployment legacy-app -n nivel-76` y añade:
+     ```yaml
+     - name: sidecar
+       image: busybox:1.37
+       command: ["/bin/sh", "-c", "tail -n+1 -f /var/log/legacy-app.log"]
+       volumeMounts:
+       - name: logs
+         mountPath: /var/log
+     ```
+     Comprobación: `kubectl logs deploy/legacy-app -c sidecar -n nivel-76`.
+  6. **Nodo caído:** `kubectl get nodes` → `kubectl debug node/<nodo> -it --image=busybox:1.37` (o `aws ssm start-session`) → `systemctl status kubelet` → `systemctl start kubelet`. Esperar sin hacer nada no lo arregla.
+- **Aprendes:** el examen es práctico y por tareas: lee bien el namespace de cada una, compruébala (get, describe, `auth can-i`, logs) y no te atasques: pasa a la siguiente.

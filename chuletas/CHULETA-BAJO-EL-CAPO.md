@@ -134,7 +134,75 @@ kubectl auth can-i list secrets -n kube-system --as=system:serviceaccount:<ns>:<
 
 Cuidado con los atajos: los ClusterRoles `view`, `edit` y `admin` dan mucho más de lo que parece. Mínimo privilegio es escribir el tuyo.
 
-## 8. EKS Pod Identity: credenciales de AWS sin claves
+## 8. Pods con varios contenedores (sidecars)
+
+Un Pod puede llevar varios contenedores: la aplicación y sus «ayudantes» (sidecars: recoger logs, hacer de proxy, vigilar…).
+
+| Comparten | No comparten |
+|---|---|
+| La **red**: misma IP, se hablan por `localhost` (y no pueden usar el mismo puerto) | Sistema de ficheros: cada uno el de su imagen |
+| Los **volúmenes** que monten los dos (p. ej. un `emptyDir`) | cgroup, límites y sondas: cada contenedor los suyos |
+| Los procesos, **solo** con `shareProcessNamespace: true` (el PID 1 pasa a ser `/pause`) | Variables de entorno |
+
+```bash
+kubectl get pods -n <ns>                                  # READY 1/2 = 1 de 2 contenedores listo
+kubectl describe pod <pod> -n <ns>                        # un bloque por contenedor: State, Ready, Restart Count, sondas
+kubectl logs <pod> -c <contenedor> -n <ns>                # los logs de UNO
+kubectl logs <pod> --all-containers --prefix -n <ns>      # los de todos, con prefijo
+kubectl exec -it <pod> -c <contenedor> -n <ns> -- sh      # entrar en UNO
+kubectl set env deployment/<dep> -c <contenedor> CLAVE=valor -n <ns>   # sin -c, va al primero
+```
+
+Para añadir un sidecar: `kubectl edit deployment <dep>` y otro elemento en `containers:` (con su `name`, `image`, `command` y, si comparte ficheros, el mismo volumen en `volumeMounts`):
+
+```yaml
+      volumes:
+      - name: logs
+        emptyDir: {}
+      containers:
+      - name: app
+        image: busybox:1.37
+        volumeMounts: [{name: logs, mountPath: /var/log}]
+      - name: sidecar
+        image: busybox:1.37
+        command: ["/bin/sh", "-c", "tail -n+1 -f /var/log/app.log"]
+        volumeMounts: [{name: logs, mountPath: /var/log}]
+```
+
+## 9. La red del Pod
+
+```bash
+kubectl get pods -n <ns> -o wide                       # IP de cada Pod (de la VPC, la da la VPC CNI)
+kubectl exec <pod> -n <ns> -- hostname -i              # la IP, desde dentro
+kubectl exec <pod> -n <ns> -- ip addr                  # eth0 con la IP del Pod (/32)
+kubectl exec <pod> -n <ns> -- cat /etc/resolv.conf     # nameserver = IP del Service kube-dns · search · ndots:5
+kubectl exec <pod> -n <ns> -- cat /etc/hosts           # el Pod se resuelve a sí mismo
+kubectl run t --rm -it --image=busybox:1.37 -n <ns> -- wget -qO- -T 2 http://<ip-del-pod>:<puerto>   # directo al Pod, sin Service
+```
+
+- Pod → Pod: directo por IP, sin NAT. Pod → Service: la IP del Service es virtual y la traducen las reglas de kube-proxy (abajo).
+- Un Service solo reparte a los Pods **listos** (sus endpoints): `kubectl get endpoints <svc> -n <ns>`.
+
+## 10. Desde el nodo: el contenedor como proceso
+
+Entra con `kubectl debug node/<nodo> -it --image=busybox:1.37` (o `aws ssm start-session --target <instance-id>`).
+
+```bash
+crictl pods                                   # los Pods (sandboxes) del nodo
+crictl ps [-a] [--name <contenedor>]          # sus contenedores (-a: también los muertos)
+crictl inspect <id> | grep pid                # PID del proceso EN EL NODO
+cat /proc/<pid>/cgroup                        # /kubepods.slice/kubepods-<qos>.slice/kubepods-<qos>-pod<uid>.slice/cri-containerd-<id>.scope
+cat /proc/<pid>/oom_score_adj                 # Guaranteed -997 · Burstable 2-999 · BestEffort 1000
+nsenter -t <pid> -n ip addr                   # entra SOLO en la red del contenedor (ves la IP del Pod)
+ps aux                                        # kubelet, containerd y los procesos de los contenedores
+iptables-save | grep <service>                # reglas de kube-proxy: KUBE-SVC → KUBE-SEP → DNAT a <ip-pod>:<targetPort>
+systemctl status kubelet · journalctl -u kubelet -n 50
+```
+
+- Dentro del contenedor, `cat /proc/self/cgroup` da `0::/`: tiene su propio namespace de cgroup. La ruta real solo se ve desde el nodo.
+- Si el nodo se queda sin memoria, el kernel mata primero al de `oom_score_adj` más alto: por eso los requests importan.
+
+## 11. EKS Pod Identity: credenciales de AWS sin claves
 
 ```bash
 aws eks create-pod-identity-association --cluster-name <cluster> \

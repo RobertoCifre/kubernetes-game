@@ -209,6 +209,8 @@ function prepararServicio(s){
   s.spec = s.spec || {}; s.spec.type = s.spec.type || "ClusterIP";
   if (!s.spec.clusterIP) s.spec.clusterIP = ipServicio(s.metadata.namespace, s.metadata.name);
   s.spec.ports = (s.spec.ports || []).map(p => Object.assign({protocol:"TCP"}, p, {targetPort: p.targetPort !== undefined ? p.targetPort : p.port}));
+  // NodePort y LoadBalancer abren además un puerto 30000-32767 en cada nodo
+  if (s.spec.type === "NodePort" || s.spec.type === "LoadBalancer") s.spec.ports.forEach((p, i) => { if (!p.nodePort) p.nodePort = 30000 + (hash(`${s.metadata.namespace}/${s.metadata.name}/${i}`) % 2768); });
   if (s.spec.type === "NodePort" || s.spec.type === "LoadBalancer") s.spec.ports.forEach((p, k) => { if (!p.nodePort) p.nodePort = 30000 + (hash(s.metadata.name + k) % 2767); });
   if (s.spec.type === "LoadBalancer"){
     s.status = s.status || {loadBalancer:{}};
@@ -351,7 +353,7 @@ function contenidoWeb(p, ruta){
 }
 
 /* ---------- mini-shell (busybox): scripts y comandos ---------- */
-const APPLETS = ["sh","ash","echo","printf","sleep","exit","true","false","test","[","wget","nslookup","cat","env","printenv","hostname","date","ls","ps","whoami","id","pwd","uname","nc","ping","head","tail","grep","wc","export","cd","top","df","free","mkdir","touch","rm","stress"];
+const APPLETS = ["sh","ash","echo","printf","sleep","exit","true","false","test","[","wget","nslookup","cat","env","printenv","hostname","date","ls","ps","whoami","id","pwd","uname","nc","ping","head","tail","grep","wc","export","cd","top","df","free","mkdir","touch","rm","stress","ip","tee"];
 function palabras(s, env){
   const r = []; let act = "", q = null, hay = false;
   const exp = t => t.replace(/\$\{(\w+)\}|\$(\w+)/g, (_, a, b) => (env[a || b] ?? ""));
@@ -440,17 +442,27 @@ function usuarioDe(p, c){
 }
 function usuarioCtx(ctx){ return usuarioDe(ctx.pod && !ctx.debug ? ctx.pod : null, ctx.c || (ctx.pod && ctx.pod.spec ? ctx.pod.spec.containers[0] : {image:"busybox"})); }
 const nombreUsuario = u => u === 0 ? "root" : u === 101 ? "nginx" : String(u);
-function procesoPrincipal(p){
-  const c = p.spec.containers[0]; const perf = perfil(c); const cmd = [...(c.command || []), ...(c.args || [])];
+function procesoPrincipal(p, c){
+  c = c || p.spec.containers[0]; const perf = perfil(c); const cmd = [...(c.command || []), ...(c.args || [])];
   if (perf.tipo === "web" && !cmd.length) return "nginx: master process nginx -g daemon off;";
   if (cmd.length) return cmd.join(" ");
   if (/pause/.test(c.image)) return "/pause";
   if (perf.tipo === "sistema") return "/" + c.name;
   return perf.tipo === "generico" ? "/app" : "sh";
 }
-function procesosDe(p){
-  const c = p.spec.containers[0]; const u = nombreUsuario(usuarioDe(p, c));
-  const l = [{pid:1, user:u, cmd:procesoPrincipal(p)}];
+function procesosDe(p, c){
+  c = c || p.spec.containers[0];
+  if (p.spec.shareProcessNamespace){                       // todos los contenedores comparten procesos: PID 1 = /pause
+    const l = [{pid:1, user:"65535", cmd:"/pause"}]; let pid = 7;
+    for (const cc of p.spec.containers){
+      const u = nombreUsuario(usuarioDe(p, cc)); l.push({pid:pid++, user:u, cmd:procesoPrincipal(p, cc)});
+      if (perfil(cc).tipo === "web" && !(cc.command && cc.command.length)) l.push({pid:pid++, user:perfil(cc).root ? "nginx" : u, cmd:"nginx: worker process"}, {pid:pid++, user:perfil(cc).root ? "nginx" : u, cmd:"nginx: worker process"});
+      pid += 3;
+    }
+    return l;
+  }
+  const u = nombreUsuario(usuarioDe(p, c));
+  const l = [{pid:1, user:u, cmd:procesoPrincipal(p, c)}];
   if (perfil(c).tipo === "web" && !(c.command && c.command.length)) l.push({pid:29, user:perfil(c).root ? "nginx" : u, cmd:"nginx: worker process"}, {pid:30, user:perfil(c).root ? "nginx" : u, cmd:"nginx: worker process"});
   return l;
 }
@@ -473,6 +485,9 @@ function ficheroContenedor(ctx, ruta){
     case "/sys/fs/cgroup/cpu.stat": { const vivo = Math.max(1, Math.floor(ahora() - ((ctx.pod && ctx.pod.arranque) || ahora() - 30))); const conLim = lim.cpu !== undefined;
       return `usage_usec ${vivo * 1100}\nuser_usec ${vivo * 700}\nsystem_usec ${vivo * 400}\nnr_periods ${conLim ? vivo * 10 : 0}\nnr_throttled 0\nthrottled_usec 0`; }
     case "/sys/fs/cgroup/pids.max": return "max";
+    case "/proc/self/cgroup": case "/proc/1/cgroup": return "0::/";            // namespace de cgroup propio: desde dentro, su cgroup es la raíz
+    case "/proc/self/oom_score_adj": case "/proc/1/oom_score_adj": return ctx.pod && ctx.pod.spec ? String(proc1 && proc1.spec.shareProcessNamespace && ruta.startsWith("/proc/1") ? -998 : oomScoreAdj(ctx.pod, ctx.debug ? ctx.pod.spec.containers[0] : c)) : "0";
+    case "/etc/hosts": return `# Kubernetes-managed hosts file.\n127.0.0.1\tlocalhost\n::1\tlocalhost ip6-localhost ip6-loopback\nfe00::0\tip6-localnet\nfe00::1\tip6-mcastprefix\nfe00::2\tip6-allrouters\n${(ctx.pod && ctx.pod.ip) || "10.0.3.9"}\t${ctx.hostname || "pod"}`;
     case "/sys/fs/cgroup/cgroup.controllers": return "cpuset cpu io memory hugetlb pids rdma misc";
     case "/var/run/secrets/kubernetes.io/serviceaccount/token": return tokenMontado(ctx) ? "eyJhbGciOiJSUzI1NiIsImtpZCI6IjdmM2E5In0.eyJhdWQiOlsiaHR0cHM6Ly9rdWJlcm5ldGVzLmRlZmF1bHQuc3ZjIl0sInN1YiI6InN5c3RlbTpzZXJ2aWNlYWNjb3VudDp" + b64e(`${ctx.pod.ns}:${ctx.pod.spec.serviceAccountName || "default"}`).replace(/=/g, "") + "In0.c2ltdWxhZG8" : null;
     case "/var/run/secrets/kubernetes.io/serviceaccount/namespace": return tokenMontado(ctx) ? ctx.pod.ns : null;
@@ -481,9 +496,14 @@ function ficheroContenedor(ctx, ruta){
   if (/^\/proc\/(1|self)\/(status|cmdline|environ)$/.test(ruta)){
     const propio = ruta.includes("/self/") || !proc1;
     const p = propio ? null : proc1;
-    const cc = p ? p.spec.containers[0] : c;
+    if (p && p.spec.shareProcessNamespace && !ctx.debug){       // PID 1 compartido = el contenedor pause
+      if (ruta.endsWith("cmdline")) return "/pause";
+      if (ruta.endsWith("environ")) return null;
+      return `Name:\tpause\nUmask:\t0022\nState:\tS (sleeping)\nTgid:\t1\nPid:\t1\nPPid:\t0\nUid:\t65535\t65535\t65535\t65535\nGid:\t65535\t65535\t65535\t65535\nThreads:\t1\nCapInh:\t0000000000000000\nCapPrm:\t0000000000000000\nCapEff:\t0000000000000000\nCapBnd:\t00000000a80425fb\nCapAmb:\t0000000000000000\nNoNewPrivs:\t0\nSeccomp:\t2`;
+    }
+    const cc = p ? (ctx.debug ? p.spec.containers[0] : (c || p.spec.containers[0])) : c;
     const uid = p ? usuarioDe(p, cc) : usuarioCtx(ctx);
-    if (ruta.endsWith("cmdline")) return p ? procesoPrincipal(p) : "sh";
+    if (ruta.endsWith("cmdline")) return p ? procesoPrincipal(p, cc) : "sh";
     if (ruta.endsWith("environ")){
       if (p && ctx.debug && uid !== usuarioCtx(ctx) && !(capsDe(ctx.c || {}) & 2 ** 19)) return null;
       return Object.entries(p ? (p.envSnap || {}) : (ctx.env || {})).map(([k, v]) => `${k}=${v}`).join("\n");
@@ -491,17 +511,92 @@ function ficheroContenedor(ctx, ruta){
     const caps = capsDe(cc); const eff = uid === 0 ? caps : 0;
     const scc = cc.securityContext || {}; const psc = (p && p.spec.securityContext) || {};
     const seccomp = ((scc.seccompProfile || psc.seccompProfile || {}).type || "RuntimeDefault") !== "Unconfined";
-    return `Name:\t${(p ? procesoPrincipal(p) : "sh").split(/[ :]/)[0].replace(/^\//, "") || "sh"}\nUmask:\t0022\nState:\tS (sleeping)\nTgid:\t${propio ? 41 : 1}\nPid:\t${propio ? 41 : 1}\nPPid:\t0\nUid:\t${uid}\t${uid}\t${uid}\t${uid}\nGid:\t${uid}\t${uid}\t${uid}\t${uid}\nThreads:\t1\nCapInh:\t0000000000000000\nCapPrm:\t${hex16(eff)}\nCapEff:\t${hex16(eff)}\nCapBnd:\t${hex16(caps)}\nCapAmb:\t0000000000000000\nNoNewPrivs:\t${scc.allowPrivilegeEscalation === false ? 1 : 0}\nSeccomp:\t${seccomp ? 2 : 0}`;
+    return `Name:\t${(p ? procesoPrincipal(p, cc) : "sh").split(/[ :]/)[0].replace(/^\//, "") || "sh"}\nUmask:\t0022\nState:\tS (sleeping)\nTgid:\t${propio ? 41 : 1}\nPid:\t${propio ? 41 : 1}\nPPid:\t0\nUid:\t${uid}\t${uid}\t${uid}\t${uid}\nGid:\t${uid}\t${uid}\t${uid}\t${uid}\nThreads:\t1\nCapInh:\t0000000000000000\nCapPrm:\t${hex16(eff)}\nCapEff:\t${hex16(eff)}\nCapBnd:\t${hex16(caps)}\nCapAmb:\t0000000000000000\nNoNewPrivs:\t${scc.allowPrivilegeEscalation === false ? 1 : 0}\nSeccomp:\t${seccomp ? 2 : 0}`;
   }
   if (ruta.startsWith("/proc/1/root/") && proc1){ const sub = ruta.slice(12); if (sub === "/etc/hostname") return proc1.name; return null; }
   return null;
 }
 
+
+/* ---------- varios contenedores por Pod: red compartida, ficheros en volúmenes, oom_score_adj ---------- */
+function envPlano(c){ const e = {}; for (const x of (c && c.env) || []) if (x && x.name && "value" in x) e[x.name] = String(x.value); return e; }
+function procContenedor(p, nombre){ if (!p || !p.spec) return null; if (p.spec.containers[0] && p.spec.containers[0].name === nombre) return p.proc || null; const l = (p.lados || []).find(z => z.name === nombre); return l ? l.proc : null; }
+function escuchaPod(p){
+  return [p.proc, ...((p.lados || []).map(l => l.proc))].filter(pr => pr && pr.escucha !== null && pr.escucha !== undefined && pr.fin !== "sale" && pr.fin !== "starterror").map(pr => pr.escucha);
+}
+function claveFichero(p, c, ruta){
+  if (!p || !p.spec) return null;
+  ruta = String(ruta);
+  const mounts = ((c && c.volumeMounts) || []).slice().sort((x, y) => y.mountPath.length - x.mountPath.length);
+  for (const m of mounts){
+    const base = m.mountPath.replace(/\/+$/, "");
+    if (ruta === base || ruta.startsWith(base + "/")){
+      const v = (p.spec.volumes || []).find(x => x.name === m.name); if (!v) continue;
+      const rel = ruta.slice(base.length).replace(/^\//, "");
+      if (v.configMap) return {cm:v.configMap.name, clave:rel};
+      if (v.secret) return {secret:v.secret.secretName, clave:rel};
+      return {k:`vol:${v.name}:${rel}`};
+    }
+  }
+  return {k:`ctr:${(c && c.name) || "?"}:${ruta}`};
+}
+function escribirFichero(ctx, ruta, lineas, anadir){
+  const cl = claveFichero(ctx.pod, ctx.c, ruta); if (!cl || !cl.k) return false;
+  const p = ctx.pod; p.ficheros = p.ficheros || {};
+  const f = p.ficheros[cl.k] = p.ficheros[cl.k] || {fijas:[]};
+  if (anadir) f.fijas = f.fijas.concat(lineas).slice(-500); else { f.fijas = lineas.slice(); delete f.vuelta; }
+  ctx.escrituras = ctx.escrituras || []; ctx.escrituras.push({k:cl.k, lineas:lineas.slice()});
+  return true;
+}
+function ficheroRaw(ctx, ruta){ const cl = claveFichero(ctx.pod, ctx.c, ruta); return cl && cl.k && ctx.pod && ctx.pod.ficheros ? ctx.pod.ficheros[cl.k] || null : null; }
+function leerFichero(ctx, ruta){
+  const cl = claveFichero(ctx.pod, ctx.c, ruta); if (!cl) return null;
+  if (cl.cm !== undefined){ const cm = obj("ConfigMap", ctx.pod.ns, cl.cm); const d = (cm && cm.data) || {}; return cl.clave in d ? String(d[cl.clave]).replace(/\n$/, "").split("\n") : null; }
+  if (cl.secret !== undefined){ const se = obj("Secret", ctx.pod.ns, cl.secret); const d = (se && se.data) || {}; return cl.clave in d ? (b64d(d[cl.clave]) || "").split("\n") : null; }
+  const f = ctx.pod && ctx.pod.ficheros ? ctx.pod.ficheros[cl.k] : null; if (!f) return null;
+  let l = f.fijas.slice();
+  if (f.vuelta && f.vuelta.length){ const veces = Math.min(100, Math.floor((ahora() - f.desde) / f.periodo)); for (let k = 0; k < veces; k++) l = l.concat(f.vuelta); }
+  return l.slice(-300);
+}
+function registrarEscrituras(pod, bucle){
+  if (!pod || !pod.ficheros || !bucle || !bucle.escrituras || !bucle.escrituras.length) return;
+  const por = {}; for (const e of bucle.escrituras) (por[e.k] = por[e.k] || []).push(...e.lineas);
+  for (const [k, lineas] of Object.entries(por)){ const f = pod.ficheros[k]; if (f){ f.vuelta = lineas; f.periodo = bucle.periodo; f.desde = ahora(); } }
+}
+function oomScoreAdj(p, c){
+  const q = qos(p.spec);
+  if (q === "Guaranteed") return -997;
+  if (q === "BestEffort") return 1000;
+  const req = memMi((((c || p.spec.containers[0]).resources || {}).requests || {}).memory) || 0;
+  const capacidadMi = 3943;                                 // memoria de un t3.medium vista por el kubelet
+  let v = 1000 - Math.floor(1000 * req / capacidadMi);
+  if (v < 2) v = 2; if (v >= 1000) v = 999;
+  return v;
+}
+function idContenedor(p, nombre){ let h = ""; for (let i = 0; h.length < 64; i++) h += hash(p.uid + "/" + nombre + "/" + i).toString(16).padStart(8, "0"); return h.slice(0, 64); }
+function pidNodo(p, nombre){ return 2000 + (hash(p.uid + "#" + nombre) % 60000); }
+function uidSlice(p){ return String(p.uid).replace(/-/g, "_"); }
+function rutaCgroup(p, nombre){
+  const q = qos(p.spec).toLowerCase();
+  const pod = q === "guaranteed" ? `kubepods-pod${uidSlice(p)}.slice` : `kubepods-${q}.slice/kubepods-${q}-pod${uidSlice(p)}.slice`;
+  return `/kubepods.slice/${pod}/cri-containerd-${idContenedor(p, nombre)}.scope`;
+}
+
 class Bloqueo { constructor(){ this.bloqueo = true; } }
 class Salida { constructor(c){ this.codigo = c; } }
 function comandoSimple(linea, ctx){
-  linea = linea.replace(/\s*\d?>\s*\/dev\/null/g, "").replace(/\s*2>&1/g, "").replace(/\s*>&2/g, "").trim();
+  const aNulo = /(^|\s)(1?>|&>)\s*\/dev\/null/.test(linea);          // la salida normal se tira (2>/dev/null solo afecta a errores)
+  linea = linea.replace(/\s*(\d|&)?>\s*\/dev\/null/g, "").replace(/\s*2>&1/g, "").replace(/\s*>&2/g, "").trim();
   if (!linea) return 0;
+  if (aNulo){ const sub = Object.assign({}, ctx, {out:() => {}}); const cod = comandoSimple(linea, sub); ctx.durmio = sub.durmio; if (sub.bucle) ctx.bucle = sub.bucle; return cod; }
+  { const m = linea.match(/\s*(>>?)\s*(\/[^\s;|&>]+)\s*$/);
+    if (m && ctx.pod && ctx.pod.spec){
+      const destino = m[2], anadir = m[1] === ">>"; const resto = linea.slice(0, m.index).trim(); const salida = [];
+      const sub = Object.assign({}, ctx, {out:t => { for (const l of String(t).split("\n")) salida.push(l); }});
+      const cod = comandoSimple(resto, sub); ctx.durmio = sub.durmio; ctx.escrituras = sub.escrituras || ctx.escrituras;
+      escribirFichero(ctx, destino, salida.filter((l, i) => !(i === salida.length - 1 && l === "")), anadir);
+      return cod;
+    } }
   const asig = linea.match(/^(\w+)=(.*)$/); if (asig && !linea.includes(" ")){ ctx.env[asig[1]] = palabras(asig[2], ctx.env)[0] || ""; return 0; }
   const w = palabras(linea, ctx.env); if (!w.length) return 0;
   let [prog, ...a] = w;
@@ -520,7 +615,30 @@ function comandoSimple(linea, ctx){
     case "test": case "[": { const args = prog === "[" ? a.slice(0, a[a.length - 1] === "]" ? -1 : a.length) : a; return evaluarTest(args) ? 0 : 1; }
     case "env": case "printenv": { if (prog === "printenv" && a[0]){ if (a[0] in ctx.env){ ctx.out(ctx.env[a[0]]); return 0; } return 1; }
       for (const [k, v] of Object.entries(ctx.env)) ctx.out(`${k}=${v}`); return 0; }
-    case "hostname": ctx.out(ctx.hostname || "pod"); return 0;
+    case "hostname": ctx.out(a[0] === "-i" ? ((ctx.pod && ctx.pod.ip) || "127.0.0.1") : (ctx.hostname || "pod")); return 0;
+    case "ip": {
+      const ip = (ctx.pod && ctx.pod.ip) || "10.0.3.9"; const k = 3 + (hash(ip) % 40);
+      ctx.out(`1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue state UNKNOWN qlen 1000\n    link/loopback 00:00:00:00:00:00 brd 00:00:00:00:00:00\n    inet 127.0.0.1/8 scope host lo\n       valid_lft forever preferred_lft forever\n3: eth0@if${k}: <BROADCAST,MULTICAST,UP,LOWER_UP,M-DOWN> mtu 9001 qdisc noqueue state UP\n    link/ether ${["0e", ...ip.split(".").map(x => (+x).toString(16).padStart(2, "0")), "9a"].join(":")} brd ff:ff:ff:ff:ff:ff\n    inet ${ip}/32 scope global eth0\n       valid_lft forever preferred_lft forever`);
+      return 0; }
+    case "tail": case "head": {
+      const sigue = a.some(x => /^-[fF]$/.test(x));
+      let desde = null, n = 10; const resto = [];
+      for (let i = 0; i < a.length; i++){
+        const x = a[i];
+        if (/^-[fF]$/.test(x)) continue;
+        if (x === "-n" && a[i + 1] !== undefined){ const v = a[++i]; if (/^\+\d+$/.test(v)) desde = parseInt(v.slice(1), 10); else n = parseInt(v, 10) || 10; continue; }
+        const m1 = x.match(/^-n(\+?)(\d+)$/); if (m1){ if (m1[1]) desde = parseInt(m1[2], 10); else n = parseInt(m1[2], 10); continue; }
+        const m2 = x.match(/^-(\d+)$/); if (m2){ n = parseInt(m2[1], 10); continue; }
+        resto.push(x);
+      }
+      const fich = resto[0]; if (!fich) return 0;
+      let lin = leerFichero(ctx, fich);
+      if (lin === null){ const f2 = ficheroContenedor(ctx, fich); lin = f2 === null ? null : String(f2).split("\n"); }
+      if (lin === null){ ctx.out(`${prog}: can't open '${fich}': No such file or directory`); return 1; }
+      const sel = prog === "head" ? lin.slice(0, n) : desde !== null ? lin.slice(Math.max(0, desde - 1)) : lin.slice(-n);
+      if (sel.length) ctx.out(sel.join("\n"));
+      if (sigue && prog === "tail"){ const f = ficheroRaw(ctx, fich); ctx.bucle = {lineas:(f && f.vuelta) || [], periodo:(f && f.periodo) || 1}; throw new Bloqueo(); }
+      return 0; }
     case "date": ctx.out(new Date().toUTCString().replace("GMT", "UTC")); return 0;
     case "whoami": { const u = usuarioCtx(ctx); ctx.out(u === 0 ? "root" : u === 101 ? "nginx" : `whoami: unknown uid ${u}`); return u === 0 || u === 101 ? 0 : 1; }
     case "id": { const u = usuarioCtx(ctx); const n = u === 0 ? "root" : u === 101 ? "nginx" : null; ctx.out(n ? `uid=${u}(${n}) gid=${u}(${n}) groups=${u}(${n})` : `uid=${u} gid=${u} groups=${u}`); return 0; }
@@ -534,12 +652,14 @@ function comandoSimple(linea, ctx){
       if (ruta === "/" ) { ctx.out("bin    dev    etc    home   lib    proc   root   run    sys    tmp    usr    var"); return 0; }
       ctx.out(`ls: ${ruta}: No such file or directory`); return 1; }
     case "ps": {
-      const filas = (ctx.objetivo ? procesosDe(ctx.objetivo) : []).concat([{pid:ctx.objetivo ? 41 : 1, user:nombreUsuario(usuarioCtx(ctx)), cmd:"sh"}, {pid:ctx.objetivo ? 48 : 7, user:nombreUsuario(usuarioCtx(ctx)), cmd:"ps"}]);
+      const filas = (ctx.objetivo ? procesosDe(ctx.objetivo, ctx.debug ? null : ctx.c) : []).concat([{pid:ctx.objetivo ? 41 : 1, user:nombreUsuario(usuarioCtx(ctx)), cmd:"sh"}, {pid:ctx.objetivo ? 48 : 7, user:nombreUsuario(usuarioCtx(ctx)), cmd:"ps"}]);
       ctx.out("PID   USER     TIME  COMMAND\n" + filas.map(f => `${String(f.pid).padStart(5)} ${String(f.user).padEnd(8)}  0:00 ${f.cmd}`).join("\n")); return 0; }
     case "cat": {
       if (a[0] === "/etc/resolv.conf"){ ctx.out(`search ${ctx.ns}.svc.cluster.local svc.cluster.local cluster.local ${REGION}.compute.internal\nnameserver 172.20.0.10\noptions ndots:5`); return 0; }
       if (a[0] === "/etc/hostname"){ ctx.out(ctx.hostname || "pod"); return 0; }
       if (a[0] && a[0].startsWith("/usr/share/nginx/html") && ctx.pod){ const r = contenidoWeb(ctx.pod, a[0].replace("/usr/share/nginx/html", "") || "/"); if (r.codigo === 200){ ctx.out(r.cuerpo); return 0; } }
+      const fx = a[0] ? leerFichero(ctx, a[0]) : null;
+      if (fx !== null){ if (fx.length) ctx.out(fx.join("\n")); return 0; }
       const f = a[0] ? ficheroContenedor(ctx, a[0]) : null;
       if (f !== null){ ctx.out(f); return 0; }
       ctx.out(`cat: can't open '${a[0] || ""}': No such file or directory`); return 1; }
@@ -588,25 +708,25 @@ function ejecutarNodos(nodos, ctx){
       let c = 0; for (const parte of partirCadena(n.si)){ if (parte.op === "&&" && c !== 0) continue; if (parte.op === "||" && c === 0) continue; c = comandoSimple(parte.cmd, sub); }
       codigo = ejecutarNodos(c === 0 ? n.entonces : n.sino, ctx);
     } else if (n.hasta !== undefined){
-      const antes = ctx.lineas.length; ctx.durmio = 0;
+      const antes = ctx.lineas.length, escAntes = (ctx.escrituras || []).length; ctx.durmio = 0;
       let c = 0; for (const parte of partirCadena(n.hasta)){ if (parte.op === "&&" && c !== 0) continue; if (parte.op === "||" && c === 0) continue; c = comandoSimple(parte.cmd, ctx); }
       if (c === 0){ codigo = 0; continue; }                     // la condición ya se cumple: el bucle termina
       try { ejecutarNodos(n.cuerpo, ctx); } catch(e){ if (!(e instanceof Bloqueo)) throw e; }
-      ctx.bucle = {lineas:ctx.lineas.slice(antes), periodo:Math.max(1, ctx.durmio || 1)};
+      ctx.bucle = {lineas:ctx.lineas.slice(antes), periodo:Math.max(1, ctx.durmio || 1), escrituras:(ctx.escrituras || []).slice(escAntes)};
       throw new Bloqueo();                                     // sigue esperando
     } else if (n.mientras !== undefined){
-      const antes = ctx.lineas.length; ctx.durmio = 0;
+      const antes = ctx.lineas.length, escAntes = (ctx.escrituras || []).length; ctx.durmio = 0;
       try { ejecutarNodos(n.cuerpo, ctx); } catch(e){ if (!(e instanceof Bloqueo)) throw e; }
-      ctx.bucle = {lineas:ctx.lineas.slice(antes), periodo:Math.max(1, ctx.durmio || 1)};
+      ctx.bucle = {lineas:ctx.lineas.slice(antes), periodo:Math.max(1, ctx.durmio || 1), escrituras:(ctx.escrituras || []).slice(escAntes)};
       throw new Bloqueo();
     }
   }
   return codigo;
 }
 /* ejecuta un comando (array) como proceso principal o con exec. Devuelve {fin, codigo, lineas, bucle, errorArranque} */
-function ejecutarProceso(cmd, env, pod, ns, perf, contenedor){
+function ejecutarProceso(cmd, env, pod, ns, perf, contenedor, esExec){
   const ctx = {env:Object.assign({}, env), lineas:[], ns, pod, perfil:perf, hostname:pod ? pod.name : "pod", cmdPrincipal:cmd.join(" "), bucle:null,
-               c:contenedor || (pod && pod.spec ? pod.spec.containers[0] : null), objetivo:pod && pod.spec && !pod.efimero && !contenedor ? pod : null};
+               c:contenedor || (pod && pod.spec ? pod.spec.containers[0] : null), objetivo:pod && pod.spec && !pod.efimero && (!contenedor || esExec) ? pod : null};
   ctx.out = t => { for (const l of String(t).split("\n")) ctx.lineas.push(l); };
   const prog = (cmd[0] || "").replace(/^\/bin\//, "").replace(/^\/usr\/bin\//, "");
   const hayShell = perf.tipo === "shell" || perf.tipo === "web" || perf.tipo === "stress";
@@ -622,7 +742,7 @@ function ejecutarProceso(cmd, env, pod, ns, perf, contenedor){
     else codigo = comandoSimple(cmd.map(x => /\s/.test(x) ? `"${x}"` : x).join(" "), ctx);
     return {fin:"sale", codigo, lineas:ctx.lineas};
   } catch(e){
-    if (e instanceof Bloqueo) return {fin:"corriendo", codigo:0, lineas:ctx.lineas, bucle:ctx.bucle};
+    if (e instanceof Bloqueo){ registrarEscrituras(pod, ctx.bucle); return {fin:"corriendo", codigo:0, lineas:ctx.lineas, bucle:ctx.bucle}; }
     if (e instanceof Salida) return {fin:"sale", codigo:e.codigo, lineas:ctx.lineas};
     return {fin:"sale", codigo:2, lineas:ctx.lineas.concat([`sh: syntax error: ${e.message}`])};
   }
@@ -634,8 +754,8 @@ function logsNginx(){
           `${new Date().toISOString().slice(0,19).replace("T"," ").replace(/-/g,"/")} [notice] 1#1: nginx/1.27.5`,
           `${new Date().toISOString().slice(0,19).replace("T"," ").replace(/-/g,"/")} [notice] 1#1: start worker processes`];
 }
-function arrancarContenedor(p){
-  const c = p.spec.containers[0]; const perf = perfil(c);
+function arrancarContenedor(p, c, env){
+  c = c || p.spec.containers[0]; const perf = perfil(c); const principal = c === p.spec.containers[0];
   const cmd = [...(c.command || []), ...(c.args || [])];
   if (perf.tipo === "sistema") return {fin:"corriendo", lineas:[], escucha:null};
   if (perf.tipo === "web" && !(c.command && c.command.length) && !(c.args && c.args.length)) return {fin:"corriendo", lineas:logsNginx(), escucha:perf.puerto};
@@ -648,7 +768,7 @@ function arrancarContenedor(p){
     if (perf.tipo === "generico") return {fin:"corriendo", lineas:[]};
     return {fin:"sale", codigo:0, lineas:[]};
   }
-  const r = ejecutarProceso(cmd, p.envSnap || {}, p, p.ns, perf);
+  const r = ejecutarProceso(cmd, env || p.envSnap || {}, p, p.ns, perf, principal ? undefined : c);
   if (perf.tipo === "web" && r.fin === "corriendo" && cmd.join(" ").includes("nginx")) r.escucha = perf.puerto;
   return r;
 }
@@ -727,6 +847,11 @@ function peticionHTTP(origen, nsOrigen, url, opciones){
     const p = s.spec.ports.find(x => x.port === u.puerto); if (!p) return malo("wget: download timed out", `curl: (28) Failed to connect to ${u.host} port ${u.puerto} after 3001 ms: Timeout was reached`, 28);
     return entregar(null, s, p, u, true);
   }
+  if (origen && (u.host === "localhost" || u.host === "127.0.0.1")) return entregarAPod(origen, origen, u, true);
+  if (/^\d+\.\d+\.\d+\.\d+$/.test(u.host)){
+    const pd = S.pods.find(x => x.ip === u.host && !x.borrando && !["Succeeded","Failed"].includes(x.fase));
+    if (pd) return entregarAPod(origen, pd, u, false);
+  }
   const r = resolver(u.host, nsOrigen);
   if (r.error) return malo(`wget: bad address '${u.host}'`, `curl: (6) Could not resolve host: ${u.host}`, 6);
   if (r.externo) return {ok:true, cuerpo:"<!doctype html><html>… (web externa) …</html>", host:u.host, ip:r.ip, puerto:u.puerto};
@@ -735,6 +860,14 @@ function peticionHTTP(origen, nsOrigen, url, opciones){
   if (!sp) return malo("wget: download timed out", `curl: (28) Failed to connect to ${u.host} port ${u.puerto} after 3002 ms: Timeout was reached`, 28);
   return entregar(origen, r.svc, sp, Object.assign(u, {ip:r.ip}), false);
 }
+function entregarAPod(origen, destino, u, mismoPod){
+  const host = u.host;
+  if (!mismoPod && origen && !permiteRed(origen, destino)) return {ok:false, wget:"wget: download timed out", curl:`curl: (28) Failed to connect to ${host} port ${u.puerto} after 3001 ms: Timeout was reached`, codigoCurl:28};
+  if ((!mismoPod && destino.estado !== "Running") || !escuchaPod(destino).includes(u.puerto)) return {ok:false, wget:`wget: can't connect to remote host (${mismoPod ? "127.0.0.1" : destino.ip}): Connection refused`, curl:`curl: (7) Failed to connect to ${host} port ${u.puerto} after 0 ms: Couldn't connect to server`, codigoCurl:7};
+  const r = contenidoWeb(destino, u.ruta);
+  if (r.codigo !== 200) return {ok:false, wget:`wget: server returned error: HTTP/1.1 ${r.codigo} Not Found`, curl:r.cuerpo, codigoCurl:0, cuerpo:r.cuerpo};
+  return {ok:true, cuerpo:r.cuerpo, host, ip:mismoPod ? "127.0.0.1" : destino.ip, puerto:u.puerto, pod:destino};
+}
 function entregar(origen, s, sp, u, desdeFuera){
   const eps = endpointsDe(s);
   const ip = u.ip || s.spec.clusterIP;
@@ -742,27 +875,27 @@ function entregar(origen, s, sp, u, desdeFuera){
   const destino = eps[0];
   if (!desdeFuera && !permiteRed(origen, destino)) return {ok:false, wget:"wget: download timed out", curl:`curl: (28) Failed to connect to ${u.host} port ${u.puerto} after 3001 ms: Timeout was reached`, codigoCurl:28};
   const tp = puertoContenedor(destino, sp.targetPort);
-  if (!destino.proc || destino.proc.escucha !== tp) return {ok:false, wget:`wget: can't connect to remote host (${ip}): Connection refused`, curl:`curl: (7) Failed to connect to ${u.host} port ${u.puerto} after 0 ms: Couldn't connect to server`, codigoCurl:7};
+  if (!escuchaPod(destino).includes(tp)) return {ok:false, wget:`wget: can't connect to remote host (${ip}): Connection refused`, curl:`curl: (7) Failed to connect to ${u.host} port ${u.puerto} after 0 ms: Couldn't connect to server`, codigoCurl:7};
   const r = contenidoWeb(destino, u.ruta);
   if (r.codigo !== 200) return {ok:false, wget:`wget: server returned error: HTTP/1.1 ${r.codigo} Not Found`, curl:r.cuerpo, codigoCurl:0, cuerpo:r.cuerpo};
   return {ok:true, cuerpo:r.cuerpo, host:u.host, ip, puerto:u.puerto, pod:destino};
 }
 
 /* ---------- sondas ---------- */
-function probarSonda(p, sonda){
-  const c = p.spec.containers[0]; const proc = p.proc || {};
+function probarSonda(p, sonda, cont){
+  const c = cont || p.spec.containers[0];
   if (sonda.httpGet){
     const puerto = puertoContenedor(p, sonda.httpGet.port); const ruta = sonda.httpGet.path || "/";
-    if (proc.escucha !== puerto) return {ok:false, msg:`Get "http://${p.ip}:${sonda.httpGet.port}${ruta}": dial tcp ${p.ip}:${sonda.httpGet.port}: connect: connection refused`};
+    if (!escuchaPod(p).includes(puerto)) return {ok:false, msg:`Get "http://${p.ip}:${sonda.httpGet.port}${ruta}": dial tcp ${p.ip}:${sonda.httpGet.port}: connect: connection refused`};
     const r = contenidoWeb(p, ruta); if (r.codigo >= 200 && r.codigo < 400) return {ok:true};
     return {ok:false, msg:`HTTP probe failed with statuscode: ${r.codigo}`};
   }
   if (sonda.tcpSocket){
     const puerto = puertoContenedor(p, sonda.tcpSocket.port);
-    return proc.escucha === puerto ? {ok:true} : {ok:false, msg:`dial tcp ${p.ip}:${sonda.tcpSocket.port}: connect: connection refused`};
+    return escuchaPod(p).includes(puerto) ? {ok:true} : {ok:false, msg:`dial tcp ${p.ip}:${sonda.tcpSocket.port}: connect: connection refused`};
   }
   if (sonda.exec){
-    const r = ejecutarProceso(sonda.exec.command || [], p.envSnap || {}, p, p.ns, perfil(c));
+    const r = ejecutarProceso(sonda.exec.command || [], c === p.spec.containers[0] ? (p.envSnap || {}) : envPlano(c), p, p.ns, perfil(c), c === p.spec.containers[0] ? undefined : c);
     if (r.fin === "starterror") return {ok:false, msg:r.errorArranque};
     return r.codigo === 0 ? {ok:true} : {ok:false, msg:r.lineas.join("\n") || `command ${JSON.stringify(sonda.exec.command)} exited with ${r.codigo}`};
   }
@@ -780,6 +913,7 @@ function evaluarPod(p){
   const c = p.spec.containers[0];
   const img = imagenInfo(c.image);
   if (!img.ok){ const t = ahora() - p.creado; p.estado = (t % 20) < 4 ? "ErrImagePull" : "ImagePullBackOff"; p.fase = "Pending"; p.listo = false; p.razonImagen = img; return; }
+  for (const sc of p.spec.containers.slice(1)){ const ii = imagenInfo(sc.image); if (!ii.ok){ const t = ahora() - p.creado; p.estado = (t % 20) < 4 ? "ErrImagePull" : "ImagePullBackOff"; p.fase = "Pending"; p.listo = false; p.razonImagen = ii; return; } }
   const vol = volumenesFaltan(p);
   if (vol){ p.estado = "ContainerCreating"; p.fase = "Pending"; p.listo = false; p.errorMontaje = vol; return; }
   p.errorMontaje = null;
@@ -818,7 +952,12 @@ function evaluarPod(p){
     p.errorConfig = `container has runAsNonRoot and image will run as root (pod: "${p.name}_${p.ns}(${p.uid})", container: ${c.name})`; return;
   }
   p.errorConfig = null;
-  if (p.arranque === null){ p.arranque = ahora(); p.envSnap = env.vars; p.proc = arrancarContenedor(p); p.ip = p.ip || ipPod(n); }
+  if (p.arranque === null){ p.arranque = ahora(); p.envSnap = env.vars; p.ip = p.ip || ipPod(n); p.ficheros = {}; p.proc = arrancarContenedor(p);
+    p.lados = p.spec.containers.slice(1).map(sc => ({name:sc.name, proc:arrancarContenedor(p, sc, envPlano(sc))}));
+    // los contenedores de un Pod arrancan a la vez: si uno falló porque otro aún no estaba (p. ej. el fichero que lee), el kubelet lo reinicia y a la segunda va
+    const falla = pr => pr && pr.fin === "sale" && pr.codigo !== 0;
+    if (falla(p.proc)){ const r2 = arrancarContenedor(p); if (r2.fin === "corriendo"){ p.proc = r2; p.reinicios = 1; } }
+    p.lados.forEach((l, k) => { if (falla(l.proc)){ const sc = p.spec.containers[k + 1]; const r2 = arrancarContenedor(p, sc, envPlano(sc)); if (r2.fin === "corriendo"){ l.proc = r2; l.reinicios = 1; } } }); }
   const proc = p.proc; const vivo = ahora() - p.arranque;
   const mem = proc.mem || 0, lim = limMem(c);
   let muere = null;
@@ -852,6 +991,25 @@ function evaluarPod(p){
   const rd = c.readinessProbe;
   if (rd){ const r = probarSonda(p, rd); p.fallaReadiness = r.ok ? null : r.msg; p.listo = r.ok && !enReinicio; }
   else { p.fallaReadiness = null; p.listo = !enReinicio; }
+  // el resto de contenedores (sidecars): cada uno con su estado y su sonda; el Pod está listo si lo están TODOS
+  p.listos = [p.listo];
+  for (let k = 1; k < p.spec.containers.length; k++){
+    const sc = p.spec.containers[k], l = (p.lados || [])[k - 1];
+    if (!l){ p.listos.push(false); continue; }
+    const pr = l.proc || {};
+    if (pr.fin === "starterror" || pr.fin === "sale"){
+      l.reinicios = 1 + Math.floor(vivo / CICLO_CRASH);
+      l.ultimo = {razon:pr.fin === "starterror" ? "StartError" : pr.codigo === 0 ? "Completed" : "Error", codigo:pr.fin === "starterror" ? 128 : pr.codigo, msg:pr.errorArranque};
+      l.estado = "CrashLoopBackOff"; p.listos.push(false);
+      if (p.estado === "Running") p.estado = (vivo % CICLO_CRASH) < 2 ? (pr.fin === "starterror" ? "RunContainerError" : l.ultimo.razon === "Completed" ? "Completed" : "Error") : "CrashLoopBackOff";
+      continue;
+    }
+    l.estado = "Running"; l.fallaReadiness = null;
+    let ok = true;
+    if (sc.readinessProbe){ const r = probarSonda(p, sc.readinessProbe, sc); ok = r.ok; l.fallaReadiness = r.ok ? null : r.msg; if (!r.ok && !p.fallaReadiness) p.fallaReadiness = r.msg; }
+    p.listos.push(ok);
+  }
+  p.listo = p.listos.every(Boolean);
 }
 
 /* ---------- scheduler ---------- */

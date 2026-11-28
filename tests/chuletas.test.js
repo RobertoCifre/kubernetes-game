@@ -72,6 +72,16 @@ const R = {
   64: [/kubectl debug -it \S+ .*--target=/],
   65: [/kubectl create clusterrole \S+ --verb=/, /kubectl create clusterrolebinding \S+ --clusterrole=/, /auth can-i .* -A/],
   66: [/readinessProbe\/httpGet\/path/, /kubectl create secret generic/, /kubectl logs \S+ -c /],
+  67: [/-o wide/, /hostname -i/],
+  68: [/kubectl get endpoints/],
+  69: [/resolv\.conf/, /kube-dns/],
+  70: [/set env deployment\/<\w+> -c </, /logs <pod> -c </],
+  71: [/shareProcessNamespace/, /exec -it <pod> -c </],
+  72: [/oom_score_adj/],
+  73: [/crictl ps/, /crictl inspect <id> \| grep pid/, /kubectl debug node\//],
+  74: [/\/proc\/<pid>\/cgroup/, /kubepods-<qos>/],
+  75: [/iptables-save \| grep/, /DNAT/],
+  76: [/kubectl create clusterrole/, /kubectl create rolebinding \S+ --clusterrole=/, /kubectl drain/, /namespaceSelector/, /--type=NodePort/, /systemctl start kubelet/, /volumeMounts/, /--target-port/],
 };
 let faltan = 0;
 for (const [n, pats] of Object.entries(R)) {
@@ -93,6 +103,6 @@ for (const s of ["`Pending`", "`ErrImagePull`", "`CreateContainerConfigError`", 
                  "Service sin endpoints", "Service con endpoints", "OTRO namespace", "DNS", "`<unknown>`", "`drain`", "`NotReady`", "`Forbidden`", "versión nueva"])
   if (!lineasDiag.some(l => l.split("|")[1].includes(s))) { faltan++; console.log(`  ❌ la tabla de diagnóstico no trata «${s}»`); }
 const cubiertos = Object.keys(R).length;
-if (cubiertos !== 66) { faltan++; console.log(`  ❌ la tabla cubre ${cubiertos} niveles, no 66`); }
-console.log(faltan ? `${faltan} FALLOS` : "TODO OK: los 66 niveles tienen sus comandos en las chuletas");
+if (cubiertos !== 76) { faltan++; console.log(`  ❌ la tabla cubre ${cubiertos} niveles, no 76`); }
+console.log(faltan ? `${faltan} FALLOS` : "TODO OK: los 76 niveles tienen sus comandos en las chuletas");
 process.exitCode = faltan ? 1 : 0;

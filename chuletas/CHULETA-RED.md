@@ -122,6 +122,23 @@ kubectl describe netpol <nombre> -n <ns>
 aws eks describe-addon --cluster-name <cluster> --addon-name vpc-cni --query addon.configurationValues
 ```
 
+## Cómo funciona un Service por debajo (kube-proxy)
+
+Un Service no es un proceso ni tiene interfaz de red: en cada nodo, kube-proxy (modo iptables en EKS) escribe reglas:
+
+```text
+KUBE-SERVICES  -d <ClusterIP>/32 --dport <port>   → KUBE-SVC-XXXX
+KUBE-SVC-XXXX  (reparto al azar: --probability)    → KUBE-SEP-AAAA · KUBE-SEP-BBBB …  (uno por endpoint)
+KUBE-SEP-AAAA  DNAT --to-destination <ip-pod>:<targetPort>
+```
+
+```bash
+kubectl debug node/<nodo> -it --image=busybox:1.37
+iptables-save | grep <service>          # o: iptables -t nat -L KUBE-SERVICES -n
+```
+
+Si no hay endpoints, la regla es un `REJECT`: por eso un Service sin Pods listos da «Connection refused» al instante.
+
 ## VPC CNI: cada Pod tiene una IP de la VPC
 
 En EKS, el addon `vpc-cni` (DaemonSet `aws-node`) da a cada Pod una IP real de la subnet. Por eso el máximo de Pods por nodo lo marca la red:
