@@ -7,7 +7,11 @@ body{margin:0;background:var(--bg);color:var(--txt);font:14px/1.45 ui-monospace,
 header{display:flex;align-items:center;gap:10px;padding:8px 14px;border-bottom:1px solid var(--borde);background:var(--panel);flex-wrap:wrap}
 header h1{margin:0;font-size:17px;color:var(--cian);letter-spacing:1px}
 .chip{padding:2px 10px;border:1px solid var(--borde);border-radius:12px;font-size:12px;white-space:nowrap}
-#xp{color:var(--verde)}#rango{color:var(--mag)}
+#xp{color:var(--verde)}
+#rango{color:var(--mag);font-size:13px;font-weight:700;padding:3px 12px;border:1px solid var(--mag);background:color-mix(in srgb, var(--mag) 12%, transparent);cursor:help}
+.nsnivel{display:inline-block;font-size:12px;color:var(--cian);border:1px dashed var(--cian);border-radius:6px;padding:1px 8px;margin:0 0 8px}
+.lv.cerrado{opacity:.35;cursor:not-allowed}
+.ascenso{margin:6px 0;padding:8px 12px;border:1px solid var(--mag);border-radius:8px;background:color-mix(in srgb, var(--mag) 12%, transparent);color:var(--mag);font-weight:600}
 .barra{flex:1;min-width:80px;height:8px;background:var(--boton);border-radius:4px;overflow:hidden}
 .barra>div{height:100%;width:0;background:linear-gradient(90deg,var(--verde),var(--cian));transition:width .5s}
 main{flex:1;display:grid;grid-template-columns:380px minmax(0,1fr);min-height:0}

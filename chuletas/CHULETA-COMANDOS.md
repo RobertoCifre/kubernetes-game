@@ -417,11 +417,35 @@ kubectl create deployment x --image=nginx --dry-run=client -o yaml   # genera el
 
 Abreviaturas: `po` = pods · `deploy` = deployments · `rs` = replicasets · `svc` = services · `cm` = configmaps · `ns` = namespaces · `no` = nodes · `ep` = endpoints · `ds` = daemonsets · `sa` = serviceaccounts · `quota` = resourcequotas · `pdb` = poddisruptionbudgets · `netpol` = networkpolicies.
 
+### Atajos (alias) habituales
+
+Son los del plugin `kubectl` de oh-my-zsh y de kubectl-aliases; el juego los trae puestos (escribe `alias` para verlos todos). En tu PC: `alias k=kubectl` en el `~/.bashrc`, o el plugin.
+
+| Atajo | Es | Atajo | Es |
+|---|---|---|---|
+| `k` | `kubectl` | `kd` | `kubectl describe` |
+| `kg` | `kubectl get` | `kdp` · `kdd` · `kds` · `kdn` | `describe` pods · deployment · svc · node |
+| `kgp` · `kgpw` · `kgpa` | `get pods` · `-o wide` · `--all-namespaces` | `kl` · `klf` · `klp` | `logs` · `logs -f` · `logs --previous` |
+| `kgd` · `kgs` · `kgn` | `get deployment` · `svc` · `nodes` | `kex` | `kubectl exec -it` |
+| `kga` · `kgaa` | `get all` · en todos los namespaces | `kaf` | `kubectl apply -f` |
+| `kgns` · `kgcm` · `kgsec` | `get namespaces` · `configmaps` · `secret` | `ke` · `ked` | `kubectl edit` · `edit deployment` |
+| `kge` | `get events --sort-by=.lastTimestamp` | `kdel` · `kdelp` · `kdeld` | `delete` · pods · deployment |
+| `ksd` | `kubectl scale deployment` | `kpf` | `kubectl port-forward` |
+| `krsd` · `krh` · `kru` · `krrd` | `rollout status` · `history` · `undo` · `restart` | `ktp` · `ktn` | `top pods` · `top nodes` |
+| `kcn <ns>` | fija el namespace (`config set-context --current --namespace`) | `kubens <ns>` · `kns` | lo mismo, con la herramienta kubens |
+
+```bash
+alias kk='kubectl get pods -o wide'      # crear el tuyo (en el juego dura la sesión)
+unalias kk                               # quitarlo
+kubens nivel-14                          # a partir de aquí no hace falta -n nivel-14
+kubens default                           # volver
+```
+
 ## 9. Los comandos del juego (navegador)
 
 ```text
 help                 # todos los comandos que entiende el simulador
-mapa                 # los 60 niveles y cuáles llevas
+mapa                 # los 66 niveles y cuáles llevas (se desbloquean en orden)
 mision               # vuelve a enseñar la misión
 pista                # una pista (−20 XP)
 comprobar            # ¿lo he resuelto? (las misiones se comprueban solas)

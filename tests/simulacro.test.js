@@ -1,4 +1,4 @@
-// Simulacro: en cada uno de los 60 niveles lanza ~170 comandos reales de kubectl/aws y falla si alguno
+// Simulacro: en cada uno de los 66 niveles lanza ~170 comandos reales de kubectl/aws y falla si alguno
 // provoca una excepción o una respuesta de «no soportado». Uso: node tests/simulacro.test.js  (tarda 1-3 min)
 const fs = require("fs");
 global.SALIDA_PRUEBAS = []; global.EDITOR_PRUEBAS = [];

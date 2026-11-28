@@ -4,8 +4,9 @@
    ========================================================================== */
 "use strict";
 
-const VERSION_JUEGO = "3.0";
-const CLAVE_PARTIDA = "eksquest2";
+const VERSION_JUEGO = "3.1";
+const CLAVE_PARTIDA = "eksquest3";
+const NUEVOS_AL_PRINCIPIO = 6;   // la v3.1 metió 6 niveles nuevos delante: los de la v2/3.0 suben 6 puestos
 let P = {hechos:{}, actual:1, pistas:{}, solucion:{}};
 let SUPERADO_AHORA = false;
 const $ = id => document.getElementById(id);
@@ -16,20 +17,34 @@ function guardarPartida(){ try { localStorage.setItem(CLAVE_PARTIDA, JSON.string
 function cargarPartida(){
   try {
     const j = JSON.parse(localStorage.getItem(CLAVE_PARTIDA));
-    if (j && j.hechos){ P = Object.assign({hechos:{}, actual:1, pistas:{}, solucion:{}}, j); return "ok"; }
+    if (j && j.hechos){ P = Object.assign({hechos:{}, actual:1, pistas:{}, solucion:{}}, j); P.actual = primerBloqueado() > P.actual ? P.actual : (siguientePendiente(1) || 1); return "ok"; }
+    const v2 = JSON.parse(localStorage.getItem("eksquest2"));
+    if (v2 && v2.hechos){
+      const mueve = o => Object.fromEntries(Object.entries(o || {}).map(([k, v]) => [String(parseInt(k, 10) + NUEVOS_AL_PRINCIPIO), v]));
+      P = {hechos:mueve(v2.hechos), actual:1, pistas:mueve(v2.pistas), solucion:mueve(v2.solucion)};
+      P.actual = siguientePendiente(1) || 1; guardarPartida(); return "migrada";
+    }
     const viejo = JSON.parse(localStorage.getItem("eksquest"));
     if (viejo && viejo.nivel){
       const mapa = {1:1, 2:4, 3:8, 4:10, 5:12, 6:17, 7:15, 8:34, 9:24, 10:37, 11:40, 12:49};
-      for (let k = 1; k < viejo.nivel && k <= 12; k++) P.hechos[mapa[k]] = 100;
+      for (let k = 1; k < viejo.nivel && k <= 12; k++) P.hechos[mapa[k] + NUEVOS_AL_PRINCIPIO] = 100;
       P.actual = siguientePendiente(1) || 1; guardarPartida(); return "migrada";
     }
   } catch(e){}
   return "nueva";
 }
 const xpTotal = () => Object.values(P.hechos).reduce((a, b) => a + b, 0);
-function rango(){
-  const x = xpTotal();
-  return x >= 5400 ? "👑 Maestro EKS" : x >= 4200 ? "🔬 Cirujano de contenedores" : x >= 3000 ? "🚒 SRE de guardia" : x >= 1800 ? "🛠️ Administrador EKS" : x >= 600 ? "🔧 Operador de cluster" : x >= 200 ? "📦 Junior de pods" : "🐣 Becario de Kubernetes";
+const RANGOS = [[0, "🐣 Becario de Kubernetes"], [300, "📦 Junior de pods"], [900, "🔧 Operador de cluster"], [2000, "🛠️ Administrador EKS"],
+                [3300, "🚒 SRE de guardia"], [4600, "🔬 Cirujano de contenedores"], [6000, "👑 Maestro EKS"]];
+function rangoDe(x){ let r = RANGOS[0][1]; for (const [d, n] of RANGOS) if (x >= d) r = n; return r; }
+function rango(){ return rangoDe(xpTotal()); }
+function proximoRango(){ const x = xpTotal(); const s = RANGOS.find(([d]) => d > x); return s ? {nombre:s[1], faltan:s[0] - x} : null; }
+function primerBloqueado(){ for (let k = 1; k <= MAX; k++) if (!(k in P.hechos)) return k + 1; return MAX + 1; }   // el primero sin hacer está abierto; los de después, cerrados
+function desbloqueado(id){ return id >= 1 && id <= MAX && id < primerBloqueado(); }
+function irANivel(id){
+  if (!id){ irA(null); return; }
+  if (!desbloqueado(id)){ const p = siguientePendiente(1); out(`🔒 El nivel ${id} está bloqueado: los niveles se desbloquean en orden. Ahora te toca el nivel ${p} («${NIVELES[p].t}»). Escribe «nivel ${p}».`, "c-am"); return; }
+  irA(id);
 }
 function siguientePendiente(desde){ for (let k = desde; k <= MAX; k++) if (!(k in P.hechos)) return k; for (let k = 1; k < desde; k++) if (!(k in P.hechos)) return k; return null; }
 
@@ -62,22 +77,25 @@ const JUEGO = {
       case "pista": pedirPista(); return true;
       case "comprobar": comprobar(false); return true;
       case "responder": responder(args.join(" ")); return true;
-      case "siguiente": irA(siguientePendiente(P.actual + 1) || Math.min(MAX, P.actual + 1)); return true;
-      case "anterior": irA(Math.max(1, P.actual - 1)); return true;
-      case "nivel": { const n = parseInt(args[0], 10); if (!(n >= 1 && n <= MAX)){ out(`Uso: nivel <1-${MAX}>`, "c-am"); return true; } irA(n); return true; }
+      case "siguiente": { if (!(P.actual in P.hechos)){ out(`Primero supera el nivel ${P.actual}: los niveles van en orden. ¿Atascado? «pista» (−20 XP) o «solucion».`, "c-am"); return true; }
+        irANivel(P.actual >= MAX ? null : P.actual + 1); return true; }
+      case "anterior": irANivel(Math.max(1, P.actual - 1)); return true;
+      case "nivel": { const n = parseInt(args[0], 10); if (!(n >= 1 && n <= MAX)){ out(`Uso: nivel <1-${MAX}>`, "c-am"); return true; } irANivel(n); return true; }
       case "repetir": case "reiniciar": irA(P.actual); return true;
       case "solucion": case "solución": verSolucion(); return true;
       case "mapa": mapaTexto(); return true;
       case "chuletas": case "chuleta": abrirChuletas(args[0]); return true;
-      case "progreso": case "estado": out(`${rango()} · ${xpTotal()} XP · ${Object.keys(P.hechos).length}/${MAX} niveles`, "c-mag"); return true;
+      case "progreso": case "estado": case "rango": { const pr = proximoRango(); out(`${rango()} · ${xpTotal()} XP · ${Object.keys(P.hechos).length}/${MAX} niveles${pr ? ` · siguiente rango: ${pr.nombre} (faltan ${pr.faltan} XP)` : " · rango máximo"}`, "c-mag"); return true; }
     }
     return false;
   },
 };
+function nsDelNivel(n){ return S && S.ns && S.ns["nivel-" + n.id] ? "nivel-" + n.id : null; }
+function lineaNs(n){ const ns = nsDelNivel(n); return ns ? `📁 Namespace de este nivel: ${ns}  →  añade  -n ${ns}  a tus comandos (en este juego el namespace es siempre «nivel-» + el número del nivel)` : "📁 Este nivel no tiene namespace propio: se trabaja con los nodos, con kube-system o con AWS"; }
 function textoMision(n){ return `━━━ NIVEL ${n.id} · ${MUNDOS[n.mundo - 1]} · ${n.t} ━━━\n${n.m}`; }
-function mostrarMision(){ const n = NIVEL(); out(textoMision(n), "c-am"); }
+function mostrarMision(){ const n = NIVEL(); out(textoMision(n), "c-am"); out(lineaNs(n), "c-cian"); }
 function irA(id){
-  if (!id){ out("🏆 ¡Has superado los 60 niveles! Ahora, a practicarlo en un cluster de verdad: kind o minikube en tu PC, o un EKS de pruebas.", "c-ok"); return; }
+  if (!id){ out("🏆 ¡Has superado los 66 niveles! Ahora, a practicarlo en un cluster de verdad: kind o minikube en tu PC, o un EKS de pruebas.", "c-ok"); return; }
   P.actual = id; guardarPartida(); SUPERADO_AHORA = false;
   MODO = null; JUEGO.cambioPrompt();
   estadoBase();
@@ -105,9 +123,11 @@ function verSolucion(){
 function premio(n){ return P.solucion[n.id] && !(n.id in P.hechos) ? 0 : Math.max(0, 100 - 20 * (P.pistas[n.id] || 0)); }
 function superar(){
   const n = NIVEL(); if (SUPERADO_AHORA) return; SUPERADO_AHORA = true;
-  const antes = P.hechos[n.id], xp = premio(n);
+  const antes = P.hechos[n.id], xp = premio(n), rangoAntes = rango();
   P.hechos[n.id] = Math.max(antes || 0, xp); guardarPartida();
+  const rangoAhora = rango();
   pintarHTML(`<div class="gana">✅ ¡NIVEL ${n.id} SUPERADO! ${antes === undefined ? `+${xp} XP` : xp > antes ? `mejoras a ${xp} XP` : "(ya lo tenías)"} · ${escHTML(rango())} · ${xpTotal()} XP<br><span class="aprende">📚 Qué has aprendido: ${escHTML(n.a)}</span><br><span class="c-dim">Escribe <b>siguiente</b> o pulsa ▶ para continuar.</span></div>`);
+  if (rangoAhora !== rangoAntes){ const pr = proximoRango(); pintarHTML(`<div class="ascenso">🎖️ ¡ASCENSO! Ahora eres <b>${escHTML(rangoAhora)}</b>${pr ? `<br><span class="c-dim">Siguiente rango: ${escHTML(pr.nombre)} · te faltan ${pr.faltan} XP</span>` : "<br>Has llegado al rango máximo."}</div>`); }
   if (n.alSuperar) n.alSuperar();
   if (Object.keys(P.hechos).length === MAX) pintarHTML(`<div class="gana">🏆 ¡HAS COMPLETADO EKS QUEST! ${xpTotal()} XP · ${escHTML(rango())}<br>Siguiente paso: practícalo en un cluster de verdad (kind o minikube en tu PC, o un EKS de pruebas).</div>`);
   if (typeof document !== "undefined" && $("mapa")) pintarPanel();
@@ -131,7 +151,7 @@ function responder(valor){
   if (ok) superar();
   else {
     out(`❌ «${valor}» no es correcto.`, "c-err");
-    if (n.id === 1 && parseInt(valor, 10) > 100) out("   Eso parecen IPs de una subnet. La pregunta es cuántos PODS caben en el NODO (kubectl describe node).", "c-am");
+    if (n.id === 7 && parseInt(valor, 10) > 100) out("   Eso parecen IPs de una subnet. La pregunta es cuántos PODS caben en el NODO (kubectl describe node).", "c-am");
     if (n.exacta && normalizar(valor) === normalizar(bueno)) out("   Casi: aquí importan mayúsculas y minúsculas (es una contraseña).", "c-am");
   }
 }
@@ -168,11 +188,11 @@ AWS        aws sts get-caller-identity · aws eks describe-cluster|describe-node
 TUBERÍAS   | grep [-i -v -c] · | wc -l · | head · | tail · | sort · | awk '{print $1}' · | base64 -d        (y ; &&)
 CONTEXTO   kubectl config current-context|get-contexts|set-context --current --namespace=NS
 
-Atajos: k = kubectl · ↑/↓ historial · Tab autocompleta · «kubectl <verbo> --help» trae ejemplos · 📚 Chuletas arriba a la derecha`, "c-dim");
+Atajos: k = kubectl · kgp, kgd, kgs, kgn, kd, kdp, kl, kex, kaf, ksd… (escribe «alias» para verlos todos) · kubens <ns> fija el namespace · ↑/↓ historial · Tab autocompleta · «kubectl <verbo> --help» trae ejemplos · 📚 Chuletas arriba a la derecha`, "c-dim");
 }
 
 /* ---------- panel ---------- */
-function claseNivel(i){ return i === P.actual ? "lv act" : i in P.hechos ? (P.hechos[i] >= 100 ? "lv ok oro" : "lv ok") : "lv"; }
+function claseNivel(i){ return i === P.actual ? "lv act" : i in P.hechos ? (P.hechos[i] >= 100 ? "lv ok oro" : "lv ok") : desbloqueado(i) ? "lv" : "lv cerrado"; }
 function pintarPanel(){
   if (!$("mapa")) return;
   const n = NIVEL();
@@ -183,6 +203,8 @@ function pintarPanel(){
   $("titulo").textContent = (n.id in P.hechos ? "✅ " : "") + n.t;
   $("tipo").textContent = n.tipo === "pregunta" ? "PREGUNTA · contesta con: responder <valor>" : "MISIÓN · se supera sola cuando el cluster queda bien";
   $("mision").textContent = n.m;
+  if ($("nsnivel")) $("nsnivel").textContent = nsDelNivel(n) ? `📁 -n ${nsDelNivel(n)}` : "📁 sin namespace propio";
+  const pr = proximoRango(); $("rango").title = pr ? `Siguiente rango: ${pr.nombre} (faltan ${pr.faltan} XP)` : "Rango máximo";
   const k = P.pistas[n.id] || 0;
   $("pistas").textContent = n.p.slice(0, k).map((x, i) => `💡 ${i + 1}. ${x}`).join("\n");
   $("btnSig").style.display = SUPERADO_AHORA || n.id in P.hechos ? "" : "none";
@@ -190,7 +212,7 @@ function pintarPanel(){
   let h = "";
   for (let m = 1; m <= MUNDOS.length; m++){
     h += `<div class="mundo"><div class="mtit">${m} · ${escHTML(MUNDOS[m - 1])}</div>`;
-    for (const x of NIVELES.filter(z => z && z.mundo === m)) h += `<button class="${claseNivel(x.id)}" title="${escHTML(x.id + ". " + x.t + (x.id in P.hechos ? " · " + P.hechos[x.id] + " XP" : ""))}" onclick="irA(${x.id})">${x.id}</button>`;
+    for (const x of NIVELES.filter(z => z && z.mundo === m)) h += `<button class="${claseNivel(x.id)}" title="${escHTML(x.id + ". " + x.t + (x.id in P.hechos ? " · " + P.hechos[x.id] + " XP" : desbloqueado(x.id) ? "" : " · 🔒 bloqueado"))}" onclick="irANivel(${x.id})">${x.id}</button>`;
     h += `</div>`;
   }
   $("niveles").innerHTML = h;
@@ -284,9 +306,9 @@ function bienvenida(estado){
  ███████╗██║  ██╗███████║    ╚██████╔╝╚██████╔╝███████╗███████║   ██║
  ╚══════╝╚═╝  ╚═╝╚══════╝     ╚══▀▀═╝  ╚═════╝ ╚══════╝╚══════╝   ╚═╝  v${VERSION_JUEGO}</pre>`);
   out(`Cluster simulado «eks-juego» · cuenta de laboratorio · Kubernetes ${K8S_MINOR} · 1 nodo t3.medium.
-60 niveles en 8 mundos, de «¿qué es un Pod?» a mirar los cgroups por dentro. Los comandos son los REALES de kubectl y aws: lo que aprendas aquí vale en EKS.
+66 niveles en 8 mundos, de «¿cómo se llama este Pod?» a mirar los cgroups por dentro. Se desbloquean en orden. Los comandos son los REALES de kubectl y aws: lo que aprendas aquí vale en EKS.
 «help» = comandos · «mapa» = niveles · 📚 Chuletas arriba · ↑/↓ historial · Tab autocompleta.`, "c-dim");
-  if (estado === "migrada") out("Partida anterior migrada: tus niveles superados de la versión 1 cuentan en la nueva numeración.", "c-am");
+  if (estado === "migrada") out("Partida anterior migrada: tus niveles superados se conservan con la nueva numeración (ahora hay 6 niveles nuevos al principio).", "c-am");
   if (estado === "ok" && Object.keys(P.hechos).length) out(`Partida recuperada: ${Object.keys(P.hechos).length}/${MAX} niveles · ${xpTotal()} XP. (El cluster se regenera al entrar en cada nivel.)`, "c-dim");
 }
 function arrancarUI(){
@@ -312,7 +334,7 @@ function arrancarUI(){
   document.addEventListener("click", e => { if (!window.getSelection().toString() && !e.target.closest(".capa") && !["BUTTON","A","TEXTAREA","INPUT"].includes(e.target.tagName)) inp.focus(); });
   setInterval(() => { reconciliar(); pintarPanel(); comprobar(true); }, 2000);
 }
-const PALABRAS = ["kubectl","get","describe","logs","create","deployment","configmap","secret","generic","namespace","job","cronjob","serviceaccount","role","rolebinding","expose","set","image","env","resources","selector","scale","autoscale","rollout","status","history","undo","restart","edit","apply","patch","label","taint","cordon","uncordon","drain","delete","exec","run","port-forward","top","explain","config","current-context","set-context","auth","can-i","whoami","nodes","pods","deploy","svc","service","endpoints","events","hpa","jobs","cronjobs","quota","resourcequota","pdb","networkpolicy","sa","roles","rolebindings","ds","rs","all","--namespace=","--replicas=","--image=","--port=","--target-port=","--type=LoadBalancer","--ignore-daemonsets","--delete-emptydir-data","--from-literal=","--limits=memory=","--requests=cpu=","--requests=memory=","--previous","--show-labels","--no-headers","--overwrite","--to-revision=","--cpu-percent=","--min=","--max=","--schedule=","--verb=","--resource=","--role=","--clusterrole=","--serviceaccount=","--as=system:serviceaccount:","--current","--rm","-it","--type=json","-o","yaml","wide","jsonpath=","aws","eks","ec2","ssm","sts","get-caller-identity","describe-cluster","describe-nodegroup","update-nodegroup-config","describe-instances","terminate-instances","start-session","--cluster-name","eks-juego","--nodegroup-name","ng-juego","--scaling-config","minSize=1,maxSize=2,desiredSize=2","--instance-ids","--target","--query","--output","text","responder","pista","comprobar","mision","siguiente","solucion","mapa","chuletas","nivel","repetir","busybox:1.37","nginx:1.27-alpine","nginx:1.28-alpine","kube-system","coredns","nslookup","wget","-qO-"];
+const PALABRAS = ["kubectl","kubens","alias","get","describe","logs","create","deployment","configmap","secret","generic","namespace","job","cronjob","serviceaccount","role","rolebinding","expose","set","image","env","resources","selector","scale","autoscale","rollout","status","history","undo","restart","edit","apply","patch","label","taint","cordon","uncordon","drain","delete","exec","run","port-forward","top","explain","config","current-context","set-context","auth","can-i","whoami","nodes","pods","deploy","svc","service","endpoints","events","hpa","jobs","cronjobs","quota","resourcequota","pdb","networkpolicy","sa","roles","rolebindings","ds","rs","all","--namespace=","--replicas=","--image=","--port=","--target-port=","--type=LoadBalancer","--ignore-daemonsets","--delete-emptydir-data","--from-literal=","--limits=memory=","--requests=cpu=","--requests=memory=","--previous","--show-labels","--no-headers","--overwrite","--to-revision=","--cpu-percent=","--min=","--max=","--schedule=","--verb=","--resource=","--role=","--clusterrole=","--serviceaccount=","--as=system:serviceaccount:","--current","--rm","-it","--type=json","-o","yaml","wide","jsonpath=","aws","eks","ec2","ssm","sts","get-caller-identity","describe-cluster","describe-nodegroup","update-nodegroup-config","describe-instances","terminate-instances","start-session","--cluster-name","eks-juego","--nodegroup-name","ng-juego","--scaling-config","minSize=1,maxSize=2,desiredSize=2","--instance-ids","--target","--query","--output","text","responder","pista","comprobar","mision","siguiente","solucion","mapa","chuletas","nivel","repetir","busybox:1.37","nginx:1.27-alpine","nginx:1.28-alpine","kube-system","coredns","nslookup","wget","-qO-"];
 function autocompletar(inp){
   const v = inp.value; const partes = v.split(" "); const ult = partes.pop(); if (!ult) return;
   const nombres = [...S.pods.map(p => p.name), ...S.nodes.map(n => n.name), ...S.nodes.map(n => n.id), ...S.objs.map(o => o.metadata.name), ...Object.keys(S.ns), ...Object.keys(S.ns).map(n => "-n " + n)];

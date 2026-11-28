@@ -161,6 +161,62 @@ function filtro(etapa, lineas){
 }
 const ERRATAS = ["ectl","kubctl","kubeclt","kubect","kubetcl","kuectl","kuberctl","kubecl","kubecttl","kctl","kubectrl","kubeclt","kubeectl","kubelctl","kubect1","kubeclt"];
 const VERBOS = ["get","describe","logs","create","expose","set","scale","autoscale","cordon","uncordon","drain","delete","top","apply","edit","patch","label","taint","rollout","exec","run","explain","port-forward","config","auth","api-resources","events"];
+/* ---------- atajos: los alias habituales (plugin kubectl de oh-my-zsh / kubectl-aliases) + kubens/kubectx + alias propios ---------- */
+const ATAJOS = {
+  k:"kubectl",
+  kg:"kubectl get", kgp:"kubectl get pods", kgpa:"kubectl get pods --all-namespaces", kgpw:"kubectl get pods -o wide", kgpwide:"kubectl get pods -o wide", kgpl:"kubectl get pods -l",
+  kgd:"kubectl get deployment", kgs:"kubectl get svc", kgn:"kubectl get nodes", kgno:"kubectl get nodes", kga:"kubectl get all", kgaa:"kubectl get all --all-namespaces",
+  kgns:"kubectl get namespaces", kgcm:"kubectl get configmaps", kgsec:"kubectl get secret", kgrs:"kubectl get rs", kgj:"kubectl get jobs", kgcj:"kubectl get cronjob",
+  kgds:"kubectl get daemonset", kgsa:"kubectl get serviceaccounts", kgev:"kubectl get events --sort-by=.lastTimestamp", kge:"kubectl get events --sort-by=.lastTimestamp",
+  kd:"kubectl describe", kdp:"kubectl describe pods", kdd:"kubectl describe deployment", kds:"kubectl describe svc", kdn:"kubectl describe node", kdno:"kubectl describe node",
+  kl:"kubectl logs", klf:"kubectl logs -f", klp:"kubectl logs --previous",
+  kex:"kubectl exec -it", keti:"kubectl exec -t -i",
+  ka:"kubectl apply", kaf:"kubectl apply -f", kak:"kubectl apply -k", kc:"kubectl create", ke:"kubectl edit", ked:"kubectl edit deployment", kes:"kubectl edit svc",
+  kdel:"kubectl delete", krm:"kubectl delete", kdelp:"kubectl delete pods", kdeld:"kubectl delete deployment", kdels:"kubectl delete svc", kdelf:"kubectl delete -f",
+  ksd:"kubectl scale deployment", kpf:"kubectl port-forward",
+  krsd:"kubectl rollout status deployment", krh:"kubectl rollout history", kru:"kubectl rollout undo", krrd:"kubectl rollout restart deployment",
+  kccc:"kubectl config current-context", kcgc:"kubectl config get-contexts", kcuc:"kubectl config use-context", kcn:"kubectl config set-context --current --namespace",
+  kt:"kubectl top", ktp:"kubectl top pods", ktn:"kubectl top nodes",
+};
+const ALIAS_PROPIOS = {};
+function expandirAtajo(a){
+  for (let vueltas = 0; vueltas < 5; vueltas++){
+    const def = ALIAS_PROPIOS[a[0]] || ATAJOS[a[0]];
+    if (!def || def === a[0]) return a;
+    let nuevo; try { nuevo = trocear(def); } catch(e){ return a; }
+    // «kcn nivel-3» → --namespace=nivel-3 (el último flag del alias recibe el primer argumento)
+    if (/--namespace$/.test(def) && a[1]) a = [...nuevo.slice(0, -1), "--namespace=" + a[1], ...a.slice(2)];
+    else a = [...nuevo, ...a.slice(1)];
+    if (a[0] === "kubectl") return a;
+  }
+  return a;
+}
+function cmdAlias(a){
+  const resto = a.slice(1).join(" ");
+  if (!resto){
+    const propios = Object.entries(ALIAS_PROPIOS).map(([k, v]) => `alias ${k}='${v}'`);
+    out(propios.concat(Object.entries(ATAJOS).map(([k, v]) => `alias ${k}='${v}'`)).join("\n"));
+    nota("(los de abajo vienen de serie; crea los tuyos con: alias kk='kubectl get pods' · quítalos con: unalias kk)");
+    return 0;
+  }
+  const m = resto.match(/^([\w.-]+)=(['"]?)(.*)\2$/);
+  if (!m){ const def = ALIAS_PROPIOS[resto] || ATAJOS[resto]; if (def){ out(`alias ${resto}='${def}'`); return 0; } err(`alias: ${resto}: not found`); return 1; }
+  if (["alias","unalias","help","pista","solucion","responder","nivel","siguiente","mapa"].includes(m[1])){ err(`(simulador) «${m[1]}» es un comando del juego: elige otro nombre`); return 1; }
+  ALIAS_PROPIOS[m[1]] = m[3]; nota(`(alias «${m[1]}» guardado para esta sesión)`); return 0;
+}
+function cmdUnalias(a){ const n = a[1]; if (!n){ err("unalias: usage: unalias name"); return 1; } if (n in ALIAS_PROPIOS){ delete ALIAS_PROPIOS[n]; return 0; } if (n in ATAJOS){ nota(`(«${n}» es un atajo de serie del simulador: no se puede quitar)`); return 0; } err(`unalias: ${n}: not found`); return 1; }
+function cmdKubens(a){
+  const ns = a[1];
+  if (!ns){ out(Object.keys(S.ns).sort().map(n => n === (S.defNs || "default") ? n + "   ← activo" : n).join("\n")); return 0; }
+  if (ns === "-"){ err("(simulador) «kubens -» no está: di el namespace"); return 1; }
+  if (!S.ns[ns]){ err(`error: no namespace exists with name "${ns}".`); return 1; }
+  S.defNs = ns === "default" ? null : ns;
+  out(`✔ Active namespace is "${ns}"`);
+  nota(`(desde ahora, los comandos sin -n van a «${ns}». Es lo mismo que: kubectl config set-context --current --namespace=${ns})`);
+  return 0;
+}
+function cmdKubectx(a){ if (!a[1]){ out("eks-juego"); return 0; } if (a[1] !== "eks-juego"){ err(`error: no context exists with the name: "${a[1]}"`); return 1; } out('✔ Switched to context "eks-juego".'); return 0; }
+
 function ejecutarComando(texto){
   let a; try { a = trocear(texto); } catch(e){ err(e.message); return 1; }
   if (!a.length) return 0;
@@ -170,10 +226,11 @@ function ejecutarComando(texto){
   let c = a[0];
   if (/^\d+$/.test(c) && JUEGO.esPregunta()){ return JUEGO.comando("responder", [c]) ? 0 : 1; }
   if (JUEGO.comando(c, a.slice(1))) return 0;
+  if (c !== "kubectl" && (ALIAS_PROPIOS[c] || ATAJOS[c])){ a = expandirAtajo(a); c = a[0]; }
   if (ERRATAS.includes(c)){ aviso(`💡 Querías decir «kubectl». Lo ejecuto así (truco: «k» también vale).`); c = "kubectl"; a[0] = c; }
   if (VERBOS.includes(c)){ aviso(`💡 En Kubernetes todo empieza por «kubectl». Lo ejecuto como: kubectl ${a.join(" ")}`); a = ["kubectl", ...a]; c = "kubectl"; }
   switch (c){
-    case "kubectl": case "k": return kubectl(a.slice(1)) || 0;
+    case "kubectl": return kubectl(a.slice(1)) || 0;
     case "aws": return aws(a.slice(1)) || 0;
     case "curl": case "wget": return curlLocal(c, a.slice(1));
     case "echo": out(a.slice(1).filter(x => x !== "-n" && x !== "-e").join(" ")); return 0;
@@ -181,7 +238,10 @@ function ejecutarComando(texto){
     case "sleep": { const n = Math.min(parseFloat(a[1] || "1") || 1, 900); avanzarReloj(n); reconciliar(); nota(`(simulador: el reloj del cluster avanza ${n} s)`); return 0; }
     case "date": out(new Date().toString()); return 0;
     case "export": nota("(variable guardada solo para esta sesión simulada)"); return 0;
-    case "alias": nota("(en este simulador «k» ya funciona como alias de kubectl)"); return 0;
+    case "alias": return cmdAlias(a);
+    case "unalias": return cmdUnalias(a);
+    case "kubens": case "kns": return cmdKubens(a);
+    case "kubectx": case "kctx": return cmdKubectx(a);
     case "source": case ".": nota("(simulador) no hace falta: el entorno ya está cargado (perfil «laboratorio», región eu-west-1)."); return 0;
     case "watch": nota("(simulador) «watch» no está: ejecuta el comando otra vez, o usa «sleep 10» para hacer avanzar el reloj."); return 0;
     case "ls": case "cd": case "pwd": case "cat": case "vi": case "vim": case "nano": case "rm": case "mkdir": case "touch":
