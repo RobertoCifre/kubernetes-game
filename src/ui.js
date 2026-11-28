@@ -4,7 +4,7 @@
    ========================================================================== */
 "use strict";
 
-const VERSION_JUEGO = "3.3";
+const VERSION_JUEGO = "3.4";
 const CLAVE_PARTIDA = "eksquest3";
 const NUEVOS_AL_PRINCIPIO = 6;   // la v3.1 metió 6 niveles nuevos delante: los de la v2/3.0 suben 6 puestos
 let P = {hechos:{}, actual:1, pistas:{}, solucion:{}};
@@ -39,11 +39,14 @@ const RANGOS = [[0, "🐣 Becario de Kubernetes"], [300, "📦 Junior de pods"],
 function rangoDe(x){ let r = RANGOS[0][1]; for (const [d, n] of RANGOS) if (x >= d) r = n; return r; }
 function rango(){ return rangoDe(xpTotal()); }
 function proximoRango(){ const x = xpTotal(); const s = RANGOS.find(([d]) => d > x); return s ? {nombre:s[1], faltan:s[0] - x} : null; }
-function primerBloqueado(){ for (let k = 1; k <= MAX; k++) if (!(k in P.hechos)) return k + 1; return MAX + 1; }   // el primero sin hacer está abierto; los de después, cerrados
-function desbloqueado(id){ return id >= 1 && id <= MAX && (P.experto || id < primerBloqueado()); }
+// El Mundo 1 (primeros pasos) es opcional y está siempre abierto. Desde el Mundo 2 los niveles van en orden.
+const esOpcional = id => !!NIVELES[id] && NIVELES[id].mundo === 1;
+function siguienteObligatorio(){ for (let k = 1; k <= MAX; k++) if (!esOpcional(k) && !(k in P.hechos)) return k; return null; }
+function primerBloqueado(){ for (let k = 1; k <= MAX; k++) if (!esOpcional(k) && !(k in P.hechos)) return k + 1; return MAX + 1; }   // el primero sin hacer está abierto; los de después, cerrados
+function desbloqueado(id){ return id >= 1 && id <= MAX && (P.experto || esOpcional(id) || id < primerBloqueado()); }
 function irANivel(id){
   if (!id){ irA(null); return; }
-  if (!desbloqueado(id)){ const p = siguientePendiente(1); out(`🔒 El nivel ${id} está bloqueado: los niveles se desbloquean en orden. Ahora te toca el nivel ${p} («${NIVELES[p].t}»). Escribe «nivel ${p}».`, "c-am"); return; }
+  if (!desbloqueado(id)){ const p = siguienteObligatorio(); out(`🔒 El nivel ${id} está bloqueado: desde el Mundo 2 los niveles se desbloquean en orden. Ahora te toca el nivel ${p} («${NIVELES[p].t}»). Escribe «nivel ${p}», o pulsa «Modo EXPERTO» para abrirlos todos.`, "c-am"); return; }
   irA(id);
 }
 function siguientePendiente(desde){ for (let k = desde; k <= MAX; k++) if (!(k in P.hechos)) return k; for (let k = 1; k < desde; k++) if (!(k in P.hechos)) return k; return null; }
@@ -77,7 +80,7 @@ const JUEGO = {
       case "pista": pedirPista(); return true;
       case "comprobar": comprobar(false); return true;
       case "responder": responder(args.join(" ")); return true;
-      case "siguiente": { if (!(P.actual in P.hechos)){ out(`Primero supera el nivel ${P.actual}: los niveles van en orden. ¿Atascado? «pista» (−20 XP) o «solucion».`, "c-am"); return true; }
+      case "siguiente": { if (!(P.actual in P.hechos) && !esOpcional(P.actual) && !P.experto){ out(`Primero supera el nivel ${P.actual}: los niveles van en orden. ¿Atascado? «pista» (−20 XP) o «solucion».`, "c-am"); return true; }
         irANivel(P.actual >= MAX ? null : P.actual + 1); return true; }
       case "anterior": irANivel(Math.max(1, P.actual - 1)); return true;
       case "nivel": { const n = parseInt(args[0], 10); if (!(n >= 1 && n <= MAX)){ out(`Uso: nivel <1-${MAX}>`, "c-am"); return true; } irANivel(n); return true; }
@@ -85,6 +88,8 @@ const JUEGO = {
       case "solucion": case "solución": verSolucion(); return true;
       case "mapa": mapaTexto(); return true;
       case "chuletas": case "chuleta": abrirChuletas(args[0]); return true;
+      case "exportar": case "guardar": exportarPartida(); return true;
+      case "importar": case "cargar": if (args.length) importarPartida(args.join(" ")); else if (typeof document !== "undefined") cargarDesdeFichero(); else out("Uso: importar <código EKSQ1:…>", "c-am"); return true;
       case "experto": {
         const apagar = /^(off|no|desactivar|quitar)$/i.test(args[0] || "");
         P.experto = !apagar; guardarPartida();
@@ -128,6 +133,51 @@ function verSolucion(){
   out("📖 Solución:\n" + n.sol, "c-mag");
 }
 function pctTareas(n){ const t = n.tareas || []; if (!t.length) return 0; let b = 0; for (const x of t){ try { if (x.ok()) b++; } catch(e){} } return Math.round(100 * b / t.length); }
+
+/* ---------- copia de la partida: fichero .json o código para copiar/pegar ---------- */
+function codigoPartida(){ return "EKSQ1:" + b64e(JSON.stringify({juego:"eks-quest", version:VERSION_JUEGO, fecha:new Date().toISOString(), partida:P})); }
+function exportarPartida(){
+  const codigo = codigoPartida();
+  P.ultimaCopia = Date.now(); guardarPartida();
+  if (typeof document === "undefined"){ out(codigo); return codigo; }
+  try {
+    const a = document.createElement("a");
+    a.href = "data:application/json;charset=utf-8," + encodeURIComponent(JSON.stringify({juego:"eks-quest", version:VERSION_JUEGO, fecha:new Date().toISOString(), partida:P}, null, 1));
+    a.download = `eks-quest-partida-${new Date().toISOString().slice(0, 10)}.json`;
+    document.body.appendChild(a); a.click(); a.remove();
+  } catch(e){}
+  out(`💾 Partida guardada en un fichero (${Object.keys(P.hechos).length}/${MAX} niveles · ${xpTotal()} XP): mira tus Descargas.\nTambién puedes copiar este código y guardarlo donde quieras (una nota, un correo…). Con «importar <código>» o el botón 📂 la recuperas, en este u otro navegador:`, "c-ok");
+  out(codigo, "c-dim");
+  try { if (navigator.clipboard) navigator.clipboard.writeText(codigo).then(() => out("(código copiado al portapapeles)", "c-dim"), () => {}); } catch(e){}
+  return codigo;
+}
+function importarPartida(texto){
+  let datos = null;
+  const t = String(texto || "").trim();
+  try { datos = t.startsWith("EKSQ1:") ? JSON.parse(b64d(t.slice(6))) : JSON.parse(t); } catch(e){ datos = null; }
+  const np = datos && (datos.partida || datos);
+  if (!np || typeof np.hechos !== "object" || np.hechos === null){ out("❌ Eso no es una partida de EKS Quest (ni un fichero .json guardado con 💾, ni un código EKSQ1:…).", "c-err"); return false; }
+  const actuales = Object.keys(P.hechos).length, nuevos = Object.keys(np.hechos).length;
+  if (actuales > nuevos && typeof confirm === "function" && typeof document !== "undefined" && !confirm(`La partida que cargas tiene ${nuevos} niveles y la actual ${actuales}. ¿Reemplazar la actual?`)) return false;
+  P = Object.assign({hechos:{}, actual:1, pistas:{}, solucion:{}}, np);
+  guardarPartida();
+  out(`📂 Partida cargada: ${Object.keys(P.hechos).length}/${MAX} niveles · ${xpTotal()} XP · ${rango()}`, "c-ok");
+  irA(desbloqueado(P.actual) ? P.actual : (siguienteObligatorio() || 1));
+  return true;
+}
+function cargarDesdeFichero(){
+  const i = document.createElement("input"); i.type = "file"; i.accept = ".json,application/json,text/plain";
+  i.onchange = () => { const f = i.files && i.files[0]; if (!f) return; const r = new FileReader(); r.onload = () => importarPartida(String(r.result)); r.readAsText(f); };
+  i.click();
+}
+function pedirPersistencia(){
+  try { if (navigator.storage && navigator.storage.persist && !P.persistentePedido){ P.persistentePedido = true; guardarPartida(); navigator.storage.persist().then(ok => { P.persistente = !!ok; guardarPartida(); }, () => {}); } } catch(e){}
+}
+function recordarCopia(){
+  const n = Object.keys(P.hechos).length;
+  const dias = P.ultimaCopia ? (Date.now() - P.ultimaCopia) / 86400000 : null;
+  if (n >= 5 && (dias === null ? n % 10 === 0 : dias > 14)) out(`💾 Consejo: ${dias === null ? "aún no has hecho ninguna copia de tu partida" : `tu última copia es de hace ${Math.floor(dias)} días`}. Pulsa «💾 Guardar» (o escribe «exportar») por si borras los datos del navegador.`, "c-am");
+}
 function premio(n){ if (Array.isArray(n.tareas)) return Math.round(Math.max(0, (P.solucion[n.id] && !(n.id in P.hechos) ? 0 : 100 - 20 * (P.pistas[n.id] || 0))) * pctTareas(n) / 100); return P.solucion[n.id] && !(n.id in P.hechos) ? 0 : Math.max(0, 100 - 20 * (P.pistas[n.id] || 0)); }
 function superar(){
   const n = NIVEL(); if (SUPERADO_AHORA) return; SUPERADO_AHORA = true;
@@ -136,6 +186,7 @@ function superar(){
   const rangoAhora = rango();
   pintarHTML(`<div class="gana">✅ ¡NIVEL ${n.id} SUPERADO! ${antes === undefined ? `+${xp} XP` : xp > antes ? `mejoras a ${xp} XP` : "(ya lo tenías)"} · ${escHTML(rango())} · ${xpTotal()} XP<br><span class="aprende">📚 Qué has aprendido: ${escHTML(n.a)}</span><br><span class="c-dim">Escribe <b>siguiente</b> o pulsa ▶ para continuar.</span></div>`);
   if (rangoAhora !== rangoAntes){ const pr = proximoRango(); pintarHTML(`<div class="ascenso">🎖️ ¡ASCENSO! Ahora eres <b>${escHTML(rangoAhora)}</b>${pr ? `<br><span class="c-dim">Siguiente rango: ${escHTML(pr.nombre)} · te faltan ${pr.faltan} XP</span>` : "<br>Has llegado al rango máximo."}</div>`); }
+  pedirPersistencia(); recordarCopia();
   if (n.alSuperar) n.alSuperar();
   if (Object.keys(P.hechos).length === MAX) pintarHTML(`<div class="gana">🏆 ¡HAS COMPLETADO EKS QUEST! ${xpTotal()} XP · ${escHTML(rango())}<br>Siguiente paso: practícalo en un cluster de verdad (kind o minikube en tu PC, o un EKS de pruebas).</div>`);
   if (typeof document !== "undefined" && $("mapa")) pintarPanel();
@@ -196,6 +247,7 @@ function ayuda(tema){
   mision · pista (−20 XP) · comprobar · responder <x> · solucion (nivel a 0 XP)
   siguiente · anterior · nivel <N> · repetir · mapa · chuletas · progreso · clear
   experto  → abre todos los niveles (para quien ya sabe; «experto off» para volver al orden)
+  exportar → copia de tu partida (fichero .json + código) · importar <código> → la recupera, también en otro navegador
   sleep <seg>  → hace avanzar el reloj del cluster (para esperar a que algo arranque)
 
 MIRAR      kubectl get pods|deploy|svc|ep|nodes|ns|cm|secret|hpa|jobs|cronjobs|quota|pdb|netpol|sa|roles|rolebindings|ds|rs|events|all
@@ -226,7 +278,7 @@ function pintarPanel(){
   const n = NIVEL();
   $("xp").textContent = `${xpTotal()} XP`; $("rango").textContent = rango();
   $("niv").textContent = `${Object.keys(P.hechos).length}/${MAX}`;
-  if ($("modo")) $("modo").style.display = P.experto ? "" : "none";
+  if ($("btnExperto")){ $("btnExperto").textContent = P.experto ? "🔓 Modo EXPERTO: activado" : "🔒 Modo EXPERTO"; $("btnExperto").classList.toggle("verde", !!P.experto); }
   $("prog").style.width = (Object.keys(P.hechos).length / MAX * 100) + "%";
   $("numnivel").textContent = `NIVEL ${n.id} · MUNDO ${n.mundo}: ${MUNDOS[n.mundo - 1].toUpperCase()}`;
   $("titulo").textContent = (n.id in P.hechos ? "✅ " : "") + n.t;
@@ -335,7 +387,7 @@ function bienvenida(estado){
  ███████╗██║  ██╗███████║    ╚██████╔╝╚██████╔╝███████╗███████║   ██║
  ╚══════╝╚═╝  ╚═╝╚══════╝     ╚══▀▀═╝  ╚═════╝ ╚══════╝╚══════╝   ╚═╝  v${VERSION_JUEGO}</pre>`);
   out(`Cluster simulado «eks-juego» · cuenta de laboratorio · Kubernetes ${K8S_MINOR} · 1 nodo t3.medium.
-76 niveles en 10 mundos, de «¿cómo se llama este Pod?» a mirar los cgroups por dentro. Se desbloquean en orden («experto» los abre todos). Es un simulador: después, practícalo en un cluster real (kind, Killercoda o un EKS de pruebas). Los comandos son los REALES de kubectl y aws: lo que aprendas aquí vale en EKS.
+76 niveles en 10 mundos, de «¿cómo se llama este Pod?» a mirar los cgroups por dentro. Los primeros pasos (Mundo 1) son opcionales: puedes empezar por el Mundo 2 («nivel 14»). Desde ahí se desbloquean en orden («Modo EXPERTO» los abre todos). Es un simulador: después, practícalo en un cluster real (kind, Killercoda o un EKS de pruebas). Los comandos son los REALES de kubectl y aws: lo que aprendas aquí vale en EKS.
 «help» = comandos · «mapa» = niveles · 📚 Chuletas arriba · ↑/↓ historial · Tab autocompleta.`, "c-dim");
   if (estado === "migrada") out("Partida anterior migrada: tus niveles superados se conservan con la nueva numeración (ahora hay 6 niveles nuevos al principio).", "c-am");
   if (estado === "ok" && Object.keys(P.hechos).length) out(`Partida recuperada: ${Object.keys(P.hechos).length}/${MAX} niveles · ${xpTotal()} XP. (El cluster se regenera al entrar en cada nivel.)`, "c-dim");

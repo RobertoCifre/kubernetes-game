@@ -1,4 +1,4 @@
-# EKS Quest 3.3 en Docker
+# EKS Quest 3.4 en Docker
 
 La imagen sirve **solo el juego del navegador**: un único HTML con los 76 niveles y las chuletas dentro.
 
@@ -13,8 +13,8 @@ Es una **simulación**: no se conecta a AWS ni a ningún cluster. No necesita cu
 Desde la carpeta raíz del proyecto:
 
 ```bash
-docker build -f docker/Dockerfile -t eks-quest:3.3 .
-docker run -d --name eks-quest -p 8080:8080 --read-only --tmpfs /tmp eks-quest:3.3
+docker build -f docker/Dockerfile -t eks-quest:3.4 .
+docker run -d --name eks-quest -p 8080:8080 --read-only --tmpfs /tmp eks-quest:3.4
 # abre http://localhost:8080
 ```
 
@@ -33,14 +33,14 @@ docker compose -f docker/docker-compose.yml down              # parar y borrar e
 |---|---|---|
 | **A. Solo el HTML** | `eks-quest.html` (≈0,45 MB) | Un navegador. Funciona sin Internet, con doble clic |
 | **B. Clonar el repositorio y construir** | `git clone` | Docker |
-| **C. Imagen exportada** | `eks-quest-3.3.tar` (`docker save`) | Docker: `docker load -i eks-quest-3.3.tar` |
+| **C. Imagen exportada** | `eks-quest-3.4.tar` (`docker save`) | Docker: `docker load -i eks-quest-3.4.tar` |
 
 Para la C, en el PC de origen:
 
 ```bash
 # imagen para Intel/AMD (amd64) y ARM (arm64: Mac con Apple Silicon, Raspberry Pi 4/5…)
-docker buildx build --platform linux/amd64,linux/arm64 -f docker/Dockerfile -t eks-quest:3.3 --load .
-docker save eks-quest:3.3 -o eks-quest-3.3.tar
+docker buildx build --platform linux/amd64,linux/arm64 -f docker/Dockerfile -t eks-quest:3.4 --load .
+docker save eks-quest:3.4 -o eks-quest-3.4.tar
 ```
 
 Exportar las dos arquitecturas en un solo `.tar` necesita el almacén de imágenes de containerd (Docker Desktop lo trae activado en las versiones recientes). Si no lo tienes, quita `--platform` y exporta solo la de tu máquina.
@@ -51,9 +51,9 @@ Exportar las dos arquitecturas en un solo `.tar` necesita el almacén de imágen
 
 ```bash
 # kind: carga la imagen local en el cluster
-kind load docker-image eks-quest:3.3
-# (en EKS: sube la imagen a ECR y usa su URI en lugar de eks-quest:3.3)
-sed 's#<IMAGEN>#eks-quest:3.3#' docker/k8s-eks-quest.yaml | kubectl apply -f -
+kind load docker-image eks-quest:3.4
+# (en EKS: sube la imagen a ECR y usa su URI en lugar de eks-quest:3.4)
+sed 's#<IMAGEN>#eks-quest:3.4#' docker/k8s-eks-quest.yaml | kubectl apply -f -
 kubectl port-forward svc/eks-quest 8080:80 -n eks-quest       # y abre http://localhost:8080
 ```
 

@@ -14,16 +14,26 @@ const superado = id => A.P.hechos[id] !== undefined;
 const limpio = id => { delete A.P.hechos[id]; A.irA(id); sal(); };
 A.clusterNuevo();
 
-console.log("== los niveles se desbloquean en orden ==");
+console.log("== el Mundo 1 es opcional; desde el Mundo 2, en orden ==");
 { const guarda = JSON.stringify(A.P.hechos); for (const k of Object.keys(A.P.hechos)) delete A.P.hechos[k];
   A.irA(1); sal();
-  let o = x("nivel 30"); ok(/bloqueado/.test(o) && A.P.actual === 1, "no se puede saltar al nivel 30", o);
-  o = x("siguiente"); ok(/Primero supera/.test(o) && A.P.actual === 1, "«siguiente» exige superar el nivel actual", o);
-  x("solucion"); o = x("siguiente"); ok(A.P.actual === 1, "ver la solución no desbloquea el siguiente", o);
-  x("responder hola"); o = x("siguiente"); ok(A.P.actual === 2, "superado el 1, «siguiente» lleva al 2", o);
-  o = x("nivel 3"); ok(/bloqueado/.test(o) && A.P.actual === 2, "el 3 sigue cerrado mientras no se supere el 2", o);
-  o = x("nivel 1"); ok(A.P.actual === 1, "se puede volver a un nivel ya superado", o);
-  o = x("mision"); ok(/Namespace de este nivel: nivel-1/.test(o), "la misión dice qué namespace usar", o);
+  let o = x("nivel 13"); ok(A.P.actual === 13, "el Mundo 1 está abierto: se puede ir al 13 sin hacer los anteriores", o);
+  o = x("siguiente"); ok(A.P.actual === 14, "en el Mundo 1 «siguiente» avanza aunque no lo hayas superado", o);
+  o = x("nivel 30"); ok(/bloqueado/.test(o) && A.P.actual === 14, "el 30 está cerrado hasta hacer el Mundo 2 en orden", o);
+  o = x("siguiente"); ok(/Primero supera/.test(o) && A.P.actual === 14, "en el Mundo 2 «siguiente» exige superar el nivel", o);
+  x("solucion"); o = x("siguiente"); ok(A.P.actual === 14, "ver la solución no desbloquea el siguiente", o);
+  x("kubectl set image deployment/api api=nginx:1.27-alpine -n nivel-14"); A.avanzarReloj(10); A.reconciliar(); comprobar(true);
+  o = x("siguiente"); ok(A.P.actual === 15, "superado el 14, «siguiente» lleva al 15", o);
+  o = x("nivel 16"); ok(/bloqueado/.test(o) && A.P.actual === 15, "el 16 sigue cerrado mientras no se supere el 15", o);
+  o = x("nivel 14"); ok(A.P.actual === 14, "se puede volver a un nivel ya superado", o);
+  o = x("mision"); ok(/Namespace de este nivel: nivel-14/.test(o), "la misión dice qué namespace usar", o);
+  console.log("== guardar y cargar la partida ==");
+  o = x("exportar"); const cod = (o.match(/EKSQ1:\S+/) || [])[0]; ok(!!cod, "«exportar» da un código de partida", o);
+  const antes = JSON.stringify(A.P.hechos);
+  for (const k of Object.keys(A.P.hechos)) delete A.P.hechos[k]; A.P.hechos[1] = 100;
+  o = x("importar " + cod); ok(JSON.stringify(A.P.hechos) === antes, "«importar <código>» recupera exactamente los niveles", o);
+  o = x("importar esto-no-es-una-partida"); ok(/no es una partida/.test(o) && JSON.stringify(A.P.hechos) === antes, "un código inválido se rechaza sin tocar la partida", o);
+  o = x("importar EKSQ1:" + Buffer.from(JSON.stringify({juego:"eks-quest", partida:{hechos:{"1":100, "2":80}, actual:2}})).toString("base64")); ok(A.P.hechos[2] === 80, "admite el contenido del fichero .json (envuelto en código)", o);
   for (const k of Object.keys(A.P.hechos)) delete A.P.hechos[k]; Object.assign(A.P.hechos, JSON.parse(guarda)); }
 
 console.log("== soluciones tramposas o incorrectas ==");
@@ -118,7 +128,7 @@ x("kubectl apply -f -"); ed(() => "apiVersion: networking.k8s.io/v1\nkind: Netwo
 x("kubectl delete networkpolicy allow-port-from-namespace -n fubar"); x("kubectl apply -f -"); ed(() => "apiVersion: networking.k8s.io/v1\nkind: NetworkPolicy\nmetadata:\n  name: allow-port-from-namespace\n  namespace: fubar\nspec:\n  podSelector: {}\n  policyTypes: [\"Ingress\"]\n  ingress:\n  - from:\n    - namespaceSelector: {}\n    ports:\n    - port: 9000\n"); o = x("comprobar"); ok(/⬜ 3\./.test(o), "N76: abrir a todos los namespaces no cuenta", o);
 x("kubectl expose deployment front-end --name=front-end-svc --port=80 -n nivel-76"); o = x("comprobar"); ok(/⬜ 4\./.test(o), "N76: Service ClusterIP y sin puerto con nombre no cuenta", o);
 x("kubectl cordon " + A.S.datos.cka.drenar); o = x("comprobar"); ok(/⬜ 2\./.test(o), "N76: cordon sin desalojar los Pods no basta", o);
-o = x("nivel 3"); ok(A.P.actual !== 3 || superado(2), "bloqueo de niveles sigue activo tras el examen", o);
+o = x("nivel 13"); ok(A.P.actual === 13, "tras el examen, el Mundo 1 sigue abierto", o);
 console.log("== modo experto y cronómetro del examen ==");
 { const guarda = JSON.stringify(A.P.hechos); for (const k of Object.keys(A.P.hechos)) delete A.P.hechos[k]; A.irA(1); sal();
   o = x("nivel 70"); ok(/bloqueado/.test(o) && A.P.actual === 1, "sin modo experto, el 70 está cerrado", o);

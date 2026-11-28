@@ -20,9 +20,9 @@ It goes from *"what is this Pod called?"* to looking **inside** containers and n
 |---|---|
 | **Online** | Open **https://robertocifre.github.io/kubernetes-game/** — nothing to install. |
 | **Just the file** | Download [`eks-quest.html`](https://github.com/RobertoCifre/kubernetes-game/releases/latest/download/eks-quest.html) from the latest release and double-click it. Any modern browser; works offline. |
-| **Docker** | `docker build -f docker/Dockerfile -t eks-quest:3.3 .` then `docker run -d -p 8080:8080 --read-only --tmpfs /tmp eks-quest:3.3` and open http://localhost:8080 |
+| **Docker** | `docker build -f docker/Dockerfile -t eks-quest:3.4 .` then `docker run -d -p 8080:8080 --read-only --tmpfs /tmp eks-quest:3.4` and open http://localhost:8080 |
 
-You don't need an AWS account, a cluster, `kubectl` or `kind`: the cluster is simulated. Your progress is saved in your browser (`localStorage`) and never leaves it — the page makes no network requests at all.
+You don't need an AWS account, a cluster, `kubectl` or `kind`: the cluster is simulated. Your progress is saved in your browser (`localStorage`) and never leaves it — the page makes no network requests at all. Each browser keeps its own save, so use **💾 Guardar** now and then: it downloads a `.json` copy and gives you a code you can load with **📂 Cargar** in any browser or computer.
 
 Type `help` in the game terminal to see what it understands, `mapa` for the level map, `pista` for a hint and `solucion` if you're stuck.
 
