@@ -1,90 +1,101 @@
-# ⎈ EKS Quest — a Kubernetes game
+# ⎈ EKS Quest — un juego para aprender Kubernetes
 
 [![tests](https://github.com/RobertoCifre/kubernetes-game/actions/workflows/tests.yml/badge.svg)](https://github.com/RobertoCifre/kubernetes-game/actions/workflows/tests.yml)
 
-**▶ Play online: https://robertocifre.github.io/kubernetes-game/**
+**▶ Juega online: https://robertocifre.github.io/kubernetes-game/**
 
-**Learn `kubectl` and Amazon EKS by fixing a broken cluster — in your browser, with nothing to install.**
+**Aprende `kubectl` y Amazon EKS arreglando un cluster roto, en el navegador y sin instalar nada.**
 
-EKS Quest is a free, single-file game. A simulated EKS cluster runs inside the page, and every level breaks it in a different way: Pods stuck in `Pending`, images that don't exist, Services without endpoints, failing probes, OOMKills, missing permissions, nodes that die… You fix them with the **real commands** (`kubectl get`, `describe`, `logs`, `exec`, `edit`, `rollout`, `aws eks …`), so everything you practise works on a real cluster.
+EKS Quest es un juego gratuito de un solo fichero. Dentro de la página corre un cluster de EKS simulado, y cada nivel lo rompe de una forma distinta: Pods atascados en `Pending`, imágenes que no existen, Services sin endpoints, sondas que fallan, OOMKills, permisos que faltan, nodos que se caen… Se arregla con los **comandos reales** (`kubectl get`, `describe`, `logs`, `exec`, `edit`, `rollout`, `aws eks …`), así que todo lo que practicas te sirve en un cluster de verdad.
 
-It goes from *"what is this Pod called?"* to looking **inside** containers and nodes: PID 1, cgroups, Linux capabilities, ServiceAccount tokens, init containers, sidecars, ephemeral debug containers, `crictl`, kube-proxy rules, ClusterRoles and EKS Pod Identity — and ends with a CKA-style final lab.
+Empieza en *«¿cómo se llama este Pod?»* y llega a mirar **por dentro** los contenedores y los nodos: el PID 1, los cgroups, las capabilities de Linux, el token de la ServiceAccount, los init containers, los sidecars, los contenedores de depuración, `crictl`, las reglas de kube-proxy, los ClusterRoles y EKS Pod Identity. Termina con un examen final al estilo de la CKA.
 
-> 🇪🇸 **The game is in Spanish** (missions, hints and cheat sheets). The commands, of course, are the same in any language.
+![EKS Quest: misión a la izquierda, terminal a la derecha](docs/captura.png)
 
-![EKS Quest: mission panel on the left, terminal on the right](docs/captura.png)
+## Cómo jugar
 
-## Play
-
-| Option | How |
+| Opción | Cómo |
 |---|---|
-| **Online** | Open **https://robertocifre.github.io/kubernetes-game/** — nothing to install. |
-| **Just the file** | Download [`eks-quest.html`](https://github.com/RobertoCifre/kubernetes-game/releases/latest/download/eks-quest.html) from the latest release and double-click it. Any modern browser; works offline. |
-| **Docker** | `docker build -f docker/Dockerfile -t eks-quest:3.4 .` then `docker run -d -p 8080:8080 --read-only --tmpfs /tmp eks-quest:3.4` and open http://localhost:8080 |
+| **Online** | Entra en **https://robertocifre.github.io/kubernetes-game/**: no hay que instalar nada. |
+| **Solo el fichero** | Descarga [`eks-quest.html`](https://github.com/RobertoCifre/kubernetes-game/releases/latest/download/eks-quest.html) de la última versión y ábrelo con doble clic. Vale cualquier navegador moderno y funciona sin Internet. |
+| **Docker** | `docker build -f docker/Dockerfile -t eks-quest:3.4 .` y después `docker run -d -p 8080:8080 --read-only --tmpfs /tmp eks-quest:3.4`; abre http://localhost:8080 |
 
-You don't need an AWS account, a cluster, `kubectl` or `kind`: the cluster is simulated. Your progress is saved in your browser (`localStorage`) and never leaves it — the page makes no network requests at all. Each browser keeps its own save, so use **💾 Guardar** now and then: it downloads a `.json` copy and gives you a code you can load with **📂 Cargar** in any browser or computer.
+No necesitas cuenta de AWS, ni cluster, ni `kubectl`, ni `kind`: el cluster es simulado.
 
-Type `help` in the game terminal to see what it understands, `mapa` for the level map, `pista` for a hint and `solucion` if you're stuck.
+**Tu partida** se guarda sola en el navegador (`localStorage`) y no sale de él: la página no hace ninguna petición a Internet. Cada navegador guarda la suya, así que de vez en cuando pulsa **💾 Guardar**: descarga una copia `.json` y te da un código que puedes recuperar con **📂 Cargar** en cualquier navegador u ordenador.
 
-## The 76 levels
+En la terminal del juego, `help` enseña todo lo que entiende, `mapa` los niveles, `pista` da una pista y `solucion` la solución si te atascas.
 
-| World | Levels | What you learn |
+## Los 76 niveles
+
+| Mundo | Niveles | Qué aprendes |
 |---|---|---|
-| 1 · Primeros pasos (*first steps*) | 1–13 | Reading the cluster: names of Deployments, Pods and Services, images, ports, replicas; then nodes, namespaces, creating, scaling, labels, logs |
-| 2 · Pods que no arrancan (*Pods that won't start*) | 14–22 | `ErrImagePull`, `CreateContainerConfigError`, `CrashLoopBackOff`, `OOMKilled`, `Pending` |
-| 3 · Tráfico y salud (*traffic and health*) | 23–30 | Selectors, `targetPort`, readiness/liveness probes, port-forward, DNS, LoadBalancers |
-| 4 · Actualizaciones y configuración (*updates and config*) | 31–38 | Rolling updates, rollbacks, ConfigMaps, Secrets, Jobs, CronJobs, DaemonSets |
-| 5 · Capacidad y escalado (*capacity and scaling*) | 39–46 | QoS, HPA, ResourceQuotas, node groups, taints, nodeSelector, drain |
-| 6 · Seguridad y permisos (*security and permissions*) | 47–51 | IAM vs RBAC, Roles, NetworkPolicies, Pod Security |
-| 7 · Guardia (*on call*) | 52–56 | Cluster versions, PodDisruptionBudgets, dead nodes, CoreDNS, chained failures |
-| 8 · Bajo el capó (*under the hood*) | 57–66 | PID 1, cgroup v2 (`memory.max`, `cpu.max`), capabilities, SA tokens, init containers, `kubectl debug`, ClusterRoles, Pod Identity |
-| 9 · Redes y Pods por dentro (*networking and Pod internals*) | 67–75 | Pod IPs, endpoints and readiness, cluster DNS, sidecars sharing `localhost` and volumes, shared process namespace, OOM score by QoS, `crictl`, cgroups from the node, kube-proxy iptables rules |
-| 10 · Examen final (*final exam*) | 76 | A CKA-style lab: six independent, separately graded tasks (RBAC, node drain, NetworkPolicy, NodePort Service, logging sidecar, broken kubelet); 66 % to pass |
+| 1 · Primeros pasos | 1–13 | Leer el cluster: nombres de Deployments, Pods y Services, imágenes, puertos y réplicas; después nodos, namespaces, crear, escalar, etiquetas y logs |
+| 2 · Pods que no arrancan | 14–22 | `ErrImagePull`, `CreateContainerConfigError`, `CrashLoopBackOff`, `OOMKilled`, `Pending` |
+| 3 · Tráfico y salud | 23–30 | Selectores, `targetPort`, sondas readiness y liveness, port-forward, DNS, LoadBalancers |
+| 4 · Actualizaciones y configuración | 31–38 | Despliegues progresivos, volver atrás, ConfigMaps, Secrets, Jobs, CronJobs, DaemonSets |
+| 5 · Capacidad y escalado | 39–46 | QoS, HPA, ResourceQuotas, node groups, taints, nodeSelector, drain |
+| 6 · Seguridad y permisos | 47–51 | IAM frente a RBAC, Roles, NetworkPolicies, Pod Security |
+| 7 · Guardia | 52–56 | Versiones del cluster, PodDisruptionBudgets, nodos caídos, CoreDNS, fallos encadenados |
+| 8 · Bajo el capó | 57–66 | PID 1, cgroup v2 (`memory.max`, `cpu.max`), capabilities, token de la ServiceAccount, init containers, `kubectl debug`, ClusterRoles, Pod Identity |
+| 9 · Redes y Pods por dentro | 67–75 | IP de cada Pod, endpoints y readiness, DNS del cluster, sidecars que comparten `localhost` y volúmenes, procesos compartidos, `oom_score_adj` según la QoS, `crictl`, cgroups vistos desde el nodo, reglas iptables de kube-proxy |
+| 10 · Examen final | 76 | Laboratorio al estilo de la CKA: seis tareas independientes que puntúan por separado (RBAC, vaciar un nodo, NetworkPolicy, Service NodePort, sidecar de logs, kubelet parado). Se aprueba con el 66 % y hay 2 horas, como en el examen |
 
-Each level is either a **mission** (fix the cluster; it's checked automatically) or a **question** (investigate and answer with `responder <value>`). Levels unlock in order (type `experto` to open them all if you already know the basics), the mission always tells you which namespace to use (`-n nivel-N`), and you climb ranks as you earn XP. The final exam is timed: 2 hours, like the CKA. Many have traps: deleting the broken thing, or giving too many permissions, doesn't count as a fix.
+Cada nivel es una **misión** (arreglas el cluster y se comprueba solo) o una **pregunta** (investigas y contestas con `responder <valor>`). La misión siempre dice qué namespace usar (`-n nivel-N`).
 
-## Cheat sheets and solutions
+- **Los primeros pasos (Mundo 1) son opcionales:** si ya sabes lo básico, empieza por el Mundo 2 (`nivel 14`). A partir de ahí los niveles se desbloquean en orden.
+- **Modo EXPERTO:** el botón de la cabecera (o `experto`) abre todos los niveles.
+- **Rangos:** subes de rango según los XP que ganas. Cada pista resta 20 XP y ver la solución deja el nivel a 0.
+- **Trampas:** borrar lo que está roto o dar permisos de más no cuenta como arreglarlo.
 
-- [`chuletas/`](chuletas) — the cheat sheets that are also built into the game (📚 button). They contain every command you need to solve all 76 levels (a test checks it): commands by task, a troubleshooting tree by Pod status, YAML templates, networking, security, capacity, AWS CLI for EKS, and what's inside a container.
-- [`docs/NIVELES.md`](docs/NIVELES.md) — ⚠️ **spoilers**: every level's setup, solution, hints and what it teaches.
+## Chuletas y solucionario
 
-## How it works
+- [`chuletas/`](chuletas): las chuletas, que también están dentro del juego (botón 📚). Organizadas por secciones (mirar, crear, cambiar, borrar, nodos, diagnosticar…) y con un índice por recurso. Tienen todos los comandos necesarios para resolver los 76 niveles; una prueba lo comprueba.
+- [`docs/NIVELES.md`](docs/NIVELES.md): ⚠️ **spoilers**. La preparación, la solución, las pistas y lo que enseña cada nivel.
 
-The page is a small Kubernetes simulator written in plain JavaScript (no frameworks, no dependencies):
+## Cómo funciona
 
-- an object store and reconciliation loop with controllers for Deployments/ReplicaSets, DaemonSets, Jobs, HPAs and nodes, plus a scheduler;
-- admission (ResourceQuota, Pod Security), RBAC, Services, DNS and NetworkPolicies;
-- a busybox-like shell inside containers, with `/proc`, `/sys/fs/cgroup` and the ServiceAccount token;
-- a YAML parser, JSONPath and JMESPath for `-o yaml`, `-o jsonpath` and `--query`.
+La página es un pequeño simulador de Kubernetes escrito en JavaScript, sin frameworks ni dependencias:
 
-It's a simulator, not a real cluster: it supports the commands and flags the levels need, plus the most common ones around them, and some low-level outputs (PIDs, cgroup paths, iptables rules, `oom_score_adj`) are realistic approximations rather than byte-for-byte copies. When you're done, practise on a real cluster: kind or minikube on your laptop, [Killercoda](https://killercoda.com/) in the browser, or a test EKS cluster.
+- almacén de objetos y bucle de reconciliación con controladores para Deployments y ReplicaSets, DaemonSets, Jobs, HPAs y nodos, además del scheduler;
+- admisión (ResourceQuota, Pod Security), RBAC, Services, DNS y NetworkPolicies;
+- Pods con varios contenedores, una shell tipo busybox dentro de cada uno con `/proc`, `/sys/fs/cgroup` y el token de la ServiceAccount, y herramientas de nodo (`crictl`, `iptables-save`, `nsenter`);
+- YAML, JSONPath y JMESPath para `-o yaml`, `-o jsonpath` y `--query`.
 
-## Build from source
+Es un simulador, no un cluster real. Entiende los comandos y opciones que necesitan los niveles y los más habituales de alrededor, y algunas salidas de bajo nivel (PIDs, rutas de cgroups, reglas de iptables, `oom_score_adj`) son aproximaciones realistas, no copias exactas. Cuando acabes, practícalo en un cluster de verdad: kind o minikube en tu ordenador, [Killercoda](https://killercoda.com/) en el navegador o un EKS de pruebas.
 
-`eks-quest.html` is generated from `src/` and `chuletas/`:
+## Construirlo desde el código
+
+`eks-quest.html` se genera a partir de `src/` y `chuletas/`:
 
 ```bash
-python construir.py               # Python 3; writes eks-quest.html
-node tests/niveles.test.js        # plays all 76 levels with their solutions
-node tests/trampas.test.js        # wrong or tricky "fixes" must NOT pass
-node tests/chuletas.test.js       # the cheat sheets contain the commands needed for every level
-node tests/simulacro.test.js      # ~12,000 real kubectl/aws commands across all levels: no crashes, no "not supported"
+python construir.py               # Python 3; genera eks-quest.html
+node tests/niveles.test.js        # juega los 76 niveles con su solución
+node tests/trampas.test.js        # los «arreglos» tramposos o incorrectos NO deben valer
+node tests/chuletas.test.js       # las chuletas tienen los comandos de todos los niveles
+node tests/simulacro.test.js      # ~12.000 comandos reales de kubectl y aws en todos los niveles: sin errores ni «no soportado»
 ```
 
-| Path | Contents |
+Las cuatro pruebas se ejecutan solas en GitHub en cada cambio (la insignia de arriba).
+
+| Ruta | Contenido |
 |---|---|
-| `src/sim.js` | The simulated cluster: objects, controllers, scheduler, containers, network |
-| `src/comandos.js` | The terminal: `kubectl` and `aws` commands |
-| `src/vistas.js` | `get` tables, `describe` and `-o yaml` output |
-| `src/niveles.js` | The 76 levels: setup, success check, hints |
-| `src/ui.js`, `src/plantilla.html`, `src/estilo.css` | The page |
-| `src/yaml.js` | YAML, JSONPath and JMESPath |
-| `docker/` | Unprivileged nginx image, Compose file and a Kubernetes manifest to deploy the game on your own cluster |
+| `src/sim.js` | El cluster simulado: objetos, controladores, scheduler, contenedores y red |
+| `src/comandos.js` | La terminal: los comandos `kubectl` y `aws` |
+| `src/vistas.js` | Las tablas de `get`, `describe` y la salida `-o yaml` |
+| `src/niveles.js` | Los 76 niveles: preparación, comprobación y pistas |
+| `src/ui.js`, `src/plantilla.html`, `src/estilo.css` | La página |
+| `src/yaml.js` | YAML, JSONPath y JMESPath |
+| `docker/` | Imagen de nginx sin root, Compose y un manifiesto para desplegar el juego en tu propio cluster |
 
-## License
+## Licencia
 
-- Code (`src/`, `tests/`, `docker/`, `construir.py`, `eks-quest.html`): [MIT](LICENSE).
-- Learning material (`chuletas/`, `docs/`): [CC BY 4.0](LICENSE-docs). `eks-quest.html` bundles the cheat sheets: that part stays under CC BY 4.0.
-- No third-party code is included. The Docker image is built on [`nginxinc/nginx-unprivileged`](https://hub.docker.com/r/nginxinc/nginx-unprivileged): if you distribute the built image, the licenses of nginx and Alpine Linux also apply to it.
+- Código (`src/`, `tests/`, `docker/`, `construir.py`, `eks-quest.html`): [MIT](LICENSE).
+- Material didáctico (`chuletas/`, `docs/`): [CC BY 4.0](LICENSE-docs). `eks-quest.html` lleva dentro las chuletas: esa parte sigue siendo CC BY 4.0.
+- No incluye código de terceros. La imagen Docker se construye sobre [`nginxinc/nginx-unprivileged`](https://hub.docker.com/r/nginxinc/nginx-unprivileged): si distribuyes la imagen construida, también se aplican las licencias de nginx y de Alpine Linux.
 
-Kubernetes® and CKA (Certified Kubernetes Administrator) are trademarks of The Linux Foundation. Amazon EKS and AWS are trademarks of Amazon.com, Inc. or its affiliates. This is an independent project, not affiliated with or endorsed by them. The final lab is inspired by publicly available CKA practice tasks; it does not contain real exam questions. The cluster in the game is simulated: the account ID (`123456789012`), resource IDs and command outputs are examples.
+Kubernetes® y CKA (Certified Kubernetes Administrator) son marcas de The Linux Foundation. Amazon EKS y AWS son marcas de Amazon.com, Inc. o sus filiales. Este es un proyecto independiente, sin relación con ellas ni respaldado por ellas. El examen final se inspira en las prácticas públicas de la CKA; no contiene preguntas reales del examen. El cluster del juego es simulado: el número de cuenta (`123456789012`), los IDs de recursos y las salidas de los comandos son ejemplos.
+
+---
+
+**English:** EKS Quest is a free browser game (in Spanish) to learn `kubectl` and Amazon EKS by fixing a simulated cluster: 76 levels from the basics to Pod internals (cgroups, capabilities, sidecars, crictl, kube-proxy) and a timed CKA-style final lab. Play at https://robertocifre.github.io/kubernetes-game/ — code under MIT, learning material under CC BY 4.0.
