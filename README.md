@@ -1,5 +1,9 @@
 # ⎈ EKS Quest — a Kubernetes game
 
+[![tests](https://github.com/RobertoCifre/kubernetes-game/actions/workflows/tests.yml/badge.svg)](https://github.com/RobertoCifre/kubernetes-game/actions/workflows/tests.yml)
+
+**▶ Play online: https://robertocifre.github.io/kubernetes-game/**
+
 **Learn `kubectl` and Amazon EKS by fixing a broken cluster — in your browser, with nothing to install.**
 
 EKS Quest is a free, single-file game. A simulated EKS cluster runs inside the page, and every level breaks it in a different way: Pods stuck in `Pending`, images that don't exist, Services without endpoints, failing probes, OOMKills, missing permissions, nodes that die… You fix them with the **real commands** (`kubectl get`, `describe`, `logs`, `exec`, `edit`, `rollout`, `aws eks …`), so everything you practise works on a real cluster.
@@ -14,8 +18,9 @@ It goes from *"what is this Pod called?"* to looking **inside** containers and n
 
 | Option | How |
 |---|---|
-| **Just the file** | Open [`eks-quest.html`](eks-quest.html), click GitHub's **Download raw file** button (⬇), then double-click the downloaded file. Any modern browser; works offline. Or clone the repo and open it from there. |
-| **Docker** | `docker build -f docker/Dockerfile -t eks-quest:3.2 .` then `docker run -d -p 8080:8080 --read-only --tmpfs /tmp eks-quest:3.2` and open http://localhost:8080 |
+| **Online** | Open **https://robertocifre.github.io/kubernetes-game/** — nothing to install. |
+| **Just the file** | Download [`eks-quest.html`](https://github.com/RobertoCifre/kubernetes-game/releases/latest/download/eks-quest.html) from the latest release and double-click it. Any modern browser; works offline. |
+| **Docker** | `docker build -f docker/Dockerfile -t eks-quest:3.3 .` then `docker run -d -p 8080:8080 --read-only --tmpfs /tmp eks-quest:3.3` and open http://localhost:8080 |
 
 You don't need an AWS account, a cluster, `kubectl` or `kind`: the cluster is simulated. Your progress is saved in your browser (`localStorage`) and never leaves it — the page makes no network requests at all.
 
@@ -36,7 +41,7 @@ Type `help` in the game terminal to see what it understands, `mapa` for the leve
 | 9 · Redes y Pods por dentro (*networking and Pod internals*) | 67–75 | Pod IPs, endpoints and readiness, cluster DNS, sidecars sharing `localhost` and volumes, shared process namespace, OOM score by QoS, `crictl`, cgroups from the node, kube-proxy iptables rules |
 | 10 · Examen final (*final exam*) | 76 | A CKA-style lab: six independent, separately graded tasks (RBAC, node drain, NetworkPolicy, NodePort Service, logging sidecar, broken kubelet); 66 % to pass |
 
-Each level is either a **mission** (fix the cluster; it's checked automatically) or a **question** (investigate and answer with `responder <value>`). Levels unlock in order, the mission always tells you which namespace to use (`-n nivel-N`), and you climb ranks as you earn XP. Many have traps: deleting the broken thing, or giving too many permissions, doesn't count as a fix.
+Each level is either a **mission** (fix the cluster; it's checked automatically) or a **question** (investigate and answer with `responder <value>`). Levels unlock in order (type `experto` to open them all if you already know the basics), the mission always tells you which namespace to use (`-n nivel-N`), and you climb ranks as you earn XP. The final exam is timed: 2 hours, like the CKA. Many have traps: deleting the broken thing, or giving too many permissions, doesn't count as a fix.
 
 ## Cheat sheets and solutions
 
@@ -52,7 +57,7 @@ The page is a small Kubernetes simulator written in plain JavaScript (no framewo
 - a busybox-like shell inside containers, with `/proc`, `/sys/fs/cgroup` and the ServiceAccount token;
 - a YAML parser, JSONPath and JMESPath for `-o yaml`, `-o jsonpath` and `--query`.
 
-It's a simulator, not a real cluster: it supports the commands and flags the levels need, plus the most common ones around them. When you're done, practise on a real cluster (kind or minikube on your laptop, or a test EKS cluster).
+It's a simulator, not a real cluster: it supports the commands and flags the levels need, plus the most common ones around them, and some low-level outputs (PIDs, cgroup paths, iptables rules, `oom_score_adj`) are realistic approximations rather than byte-for-byte copies. When you're done, practise on a real cluster: kind or minikube on your laptop, [Killercoda](https://killercoda.com/) in the browser, or a test EKS cluster.
 
 ## Build from source
 

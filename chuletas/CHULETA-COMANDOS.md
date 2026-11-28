@@ -459,4 +459,5 @@ responder 17         # niveles de pregunta
 solucion             # la solución (el nivel queda a 0 XP)
 repetir              # vuelve a montar el nivel desde cero
 siguiente · anterior · nivel 23
+experto              # abre todos los niveles (para quien ya sabe) · «experto off» vuelve al orden
 ```

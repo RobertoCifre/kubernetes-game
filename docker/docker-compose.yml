@@ -6,7 +6,7 @@ services:
     build:
       context: ..
       dockerfile: docker/Dockerfile
-    image: eks-quest:3.2
+    image: eks-quest:3.3
     container_name: eks-quest
     ports:
       - "8080:8080"

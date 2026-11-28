@@ -4,7 +4,7 @@
    ========================================================================== */
 "use strict";
 
-const VERSION_JUEGO = "3.2";
+const VERSION_JUEGO = "3.3";
 const CLAVE_PARTIDA = "eksquest3";
 const NUEVOS_AL_PRINCIPIO = 6;   // la v3.1 metió 6 niveles nuevos delante: los de la v2/3.0 suben 6 puestos
 let P = {hechos:{}, actual:1, pistas:{}, solucion:{}};
@@ -40,7 +40,7 @@ function rangoDe(x){ let r = RANGOS[0][1]; for (const [d, n] of RANGOS) if (x >=
 function rango(){ return rangoDe(xpTotal()); }
 function proximoRango(){ const x = xpTotal(); const s = RANGOS.find(([d]) => d > x); return s ? {nombre:s[1], faltan:s[0] - x} : null; }
 function primerBloqueado(){ for (let k = 1; k <= MAX; k++) if (!(k in P.hechos)) return k + 1; return MAX + 1; }   // el primero sin hacer está abierto; los de después, cerrados
-function desbloqueado(id){ return id >= 1 && id <= MAX && id < primerBloqueado(); }
+function desbloqueado(id){ return id >= 1 && id <= MAX && (P.experto || id < primerBloqueado()); }
 function irANivel(id){
   if (!id){ irA(null); return; }
   if (!desbloqueado(id)){ const p = siguientePendiente(1); out(`🔒 El nivel ${id} está bloqueado: los niveles se desbloquean en orden. Ahora te toca el nivel ${p} («${NIVELES[p].t}»). Escribe «nivel ${p}».`, "c-am"); return; }
@@ -85,6 +85,11 @@ const JUEGO = {
       case "solucion": case "solución": verSolucion(); return true;
       case "mapa": mapaTexto(); return true;
       case "chuletas": case "chuleta": abrirChuletas(args[0]); return true;
+      case "experto": {
+        const apagar = /^(off|no|desactivar|quitar)$/i.test(args[0] || "");
+        P.experto = !apagar; guardarPartida();
+        out(apagar ? "🔒 Modo experto desactivado: los niveles vuelven a desbloquearse en orden." : "🔓 Modo experto: todos los niveles abiertos (salta con «nivel N»; el Mundo 9 empieza en el 67 y el examen es el 76). Para volver al orden: «experto off».", "c-mag");
+        if (typeof document !== "undefined" && $("mapa")) pintarPanel(); return true; }
       case "progreso": case "estado": case "rango": { const pr = proximoRango(); out(`${rango()} · ${xpTotal()} XP · ${Object.keys(P.hechos).length}/${MAX} niveles${pr ? ` · siguiente rango: ${pr.nombre} (faltan ${pr.faltan} XP)` : " · rango máximo"}`, "c-mag"); return true; }
     }
     return false;
@@ -96,7 +101,9 @@ function textoMision(n){ return `━━━ NIVEL ${n.id} · ${MUNDOS[n.mundo - 1
 function mostrarMision(){ const n = NIVEL(); out(textoMision(n), "c-am"); out(lineaNs(n), "c-cian"); if (n.trasMision) n.trasMision(); }
 function irA(id){
   if (!id){ out("🏆 ¡Has superado los 76 niveles! Ahora, a practicarlo en un cluster de verdad: kind o minikube en tu PC, o un EKS de pruebas.", "c-ok"); return; }
-  P.actual = id; guardarPartida(); SUPERADO_AHORA = false;
+  P.actual = id; SUPERADO_AHORA = false;
+  if (NIVELES[id] && NIVELES[id].tiempo) P.examen = {nivel:id, inicio:Date.now()};
+  guardarPartida();
   MODO = null; JUEGO.cambioPrompt();
   estadoBase();
   try { NIVEL().prep(); } catch(e){ out("Error preparando el nivel: " + e.message, "c-err"); }
@@ -140,6 +147,18 @@ function comprobar(silencio){
   reconciliar();
   if (Array.isArray(n.tareas)){
     const pct = pctTareas(n);
+    const ex = P.examen && P.examen.nivel === n.id ? P.examen : null;
+    if (n.tiempo && ex){
+      const resto = n.tiempo - Math.floor((Date.now() - ex.inicio) / 1000);
+      if (ex.cerrado){ if (!silencio) out(`⏰ El examen terminó: nota final ${ex.nota} %. Para volver a hacerlo: «repetir» (vuelve a empezar el tiempo).`, "c-am"); return; }
+      if (resto <= 0){
+        ex.cerrado = true; ex.nota = pct; guardarPartida();
+        out(`⏰ ¡TIEMPO! Se acabaron las ${Math.round(n.tiempo / 3600)} horas. Nota final: ${pct} % ${pct >= 66 ? "→ APROBADO" : "→ no llega al 66 %"}`, pct >= 66 ? "c-ok" : "c-err");
+        if (pct >= 66 && premio(n) > (P.hechos[n.id] ?? -1)){ SUPERADO_AHORA = false; superar(); }
+        return;
+      }
+      if (!silencio) out(`⏱ Te quedan ${Math.floor(resto / 3600)} h ${String(Math.floor(resto % 3600 / 60)).padStart(2, "0")} min`, "c-cian");
+    }
     if (!silencio){ out(n.tareas.map((x, i) => { let b = false; try { b = x.ok(); } catch(e){} return `${b ? "✅" : "⬜"} ${i + 1}. ${x.t}`; }).join("\n") + `\nNota: ${pct} %  (se aprueba con 66 %)`, pct >= 66 ? "c-ok" : "c-am"); }
     if (pct >= 66 && premio(n) > (P.hechos[n.id] ?? -1)){ SUPERADO_AHORA = false; superar(); }
     else if (!silencio && pct < 66) out("❌ Todavía no llegas al 66 %. Sigue con otra tarea (son independientes).", "c-err");
@@ -176,6 +195,7 @@ function ayuda(tema){
   out(`COMANDOS DEL JUEGO
   mision · pista (−20 XP) · comprobar · responder <x> · solucion (nivel a 0 XP)
   siguiente · anterior · nivel <N> · repetir · mapa · chuletas · progreso · clear
+  experto  → abre todos los niveles (para quien ya sabe; «experto off» para volver al orden)
   sleep <seg>  → hace avanzar el reloj del cluster (para esperar a que algo arranque)
 
 MIRAR      kubectl get pods|deploy|svc|ep|nodes|ns|cm|secret|hpa|jobs|cronjobs|quota|pdb|netpol|sa|roles|rolebindings|ds|rs|events|all
@@ -206,6 +226,7 @@ function pintarPanel(){
   const n = NIVEL();
   $("xp").textContent = `${xpTotal()} XP`; $("rango").textContent = rango();
   $("niv").textContent = `${Object.keys(P.hechos).length}/${MAX}`;
+  if ($("modo")) $("modo").style.display = P.experto ? "" : "none";
   $("prog").style.width = (Object.keys(P.hechos).length / MAX * 100) + "%";
   $("numnivel").textContent = `NIVEL ${n.id} · MUNDO ${n.mundo}: ${MUNDOS[n.mundo - 1].toUpperCase()}`;
   $("titulo").textContent = (n.id in P.hechos ? "✅ " : "") + n.t;
@@ -314,7 +335,7 @@ function bienvenida(estado){
  ███████╗██║  ██╗███████║    ╚██████╔╝╚██████╔╝███████╗███████║   ██║
  ╚══════╝╚═╝  ╚═╝╚══════╝     ╚══▀▀═╝  ╚═════╝ ╚══════╝╚══════╝   ╚═╝  v${VERSION_JUEGO}</pre>`);
   out(`Cluster simulado «eks-juego» · cuenta de laboratorio · Kubernetes ${K8S_MINOR} · 1 nodo t3.medium.
-76 niveles en 10 mundos, de «¿cómo se llama este Pod?» a mirar los cgroups por dentro. Se desbloquean en orden. Los comandos son los REALES de kubectl y aws: lo que aprendas aquí vale en EKS.
+76 niveles en 10 mundos, de «¿cómo se llama este Pod?» a mirar los cgroups por dentro. Se desbloquean en orden («experto» los abre todos). Es un simulador: después, practícalo en un cluster real (kind, Killercoda o un EKS de pruebas). Los comandos son los REALES de kubectl y aws: lo que aprendas aquí vale en EKS.
 «help» = comandos · «mapa» = niveles · 📚 Chuletas arriba · ↑/↓ historial · Tab autocompleta.`, "c-dim");
   if (estado === "migrada") out("Partida anterior migrada: tus niveles superados se conservan con la nueva numeración (ahora hay 6 niveles nuevos al principio).", "c-am");
   if (estado === "ok" && Object.keys(P.hechos).length) out(`Partida recuperada: ${Object.keys(P.hechos).length}/${MAX} niveles · ${xpTotal()} XP. (El cluster se regenera al entrar en cada nivel.)`, "c-dim");
