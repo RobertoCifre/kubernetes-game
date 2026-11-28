@@ -37,5 +37,9 @@ jobs:
         run: node tests/shell.test.js
       - name: Every command in the cheat sheets works
         run: node tests/comandos-chuletas.test.js
+      - name: The same command written in different valid ways gives the same result
+        run: node tests/variantes.test.js
+      - name: Every command in the hints works
+        run: node tests/pistas.test.js
       - name: Command drill (~12,000 commands)
         run: node tests/simulacro.test.js

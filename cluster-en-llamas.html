@@ -2165,6 +2165,8 @@ function flags(args, verbo){
       if (valor && i + 1 < args.length) poner(k, args[++i]); else poner(k, true);
       continue;
     }
+    { const mm = x.match(/^-([nolcL])([^=].*)$/s);
+      if (mm && !(mm[1] === "c" && verbo === "logs" && false)){ poner(mm[1], mm[2]); continue; } }
     if (/^-[a-zA-Z]{2,}$/.test(x) && !/^-\d/.test(x)){ for (const k of x.slice(1)) f[k] = true; continue; }
     if (/^-[a-zA-Z]=/.test(x)){ poner(x[1], x.slice(3)); continue; }
     pos.push(x);
@@ -2189,12 +2191,16 @@ function tipoNombre(pos){   // "deploy/web" | "deploy web" → {r, nombre, resto
 function noExiste(r, nombre){ const grupo = r.api.includes("/") ? "." + r.api.split("/")[0] : ""; err(`Error from server (NotFound): ${r.plural}${grupo} "${nombre}" not found`); }
 function pistaNs(ns){ if (ns === "default" && JUEGO.nivelNs()) nota(`   (¿te falta -n ${JUEGO.nivelNs()}? Sin -n, kubectl mira en «default».)`); }
 function selectorLabels(expr){
-  const partes = String(expr).split(",").map(x => x.trim()).filter(Boolean);
+  // partir por comas que NO estén dentro de paréntesis: «app in (a,b),tier=web»
+  const partes = []; let act = "", prof = 0;
+  for (const c of String(expr)){ if (c === "(") prof++; if (c === ")") prof--; if (c === "," && prof === 0){ partes.push(act.trim()); act = ""; continue; } act += c; }
+  if (act.trim()) partes.push(act.trim());
   return labels => partes.every(p => {
     let m;
-    if ((m = p.match(/^([^!=]+)!=(.*)$/))) return labels[m[1]] !== m[2];
-    if ((m = p.match(/^([^=]+)==?(.*)$/))) return labels[m[1]] === m[2];
-    if ((m = p.match(/^!(.+)$/))) return !(m[1] in labels);
+    if ((m = p.match(/^([\w.\/-]+)\s+(in|notin)\s*\(([^)]*)\)$/))){ const vals = m[3].split(",").map(v => v.trim()); return m[2] === "in" ? vals.includes(labels[m[1]]) : !vals.includes(labels[m[1]]); }
+    if ((m = p.match(/^([^!=]+)!=(.*)$/))) return labels[m[1].trim()] !== m[2].trim();
+    if ((m = p.match(/^([^=]+)==?(.*)$/))) return labels[m[1].trim()] === m[2].trim();
+    if ((m = p.match(/^!(.+)$/))) return !(m[1].trim() in labels);
     return p in labels;
   });
 }
@@ -2435,6 +2441,9 @@ function ejecutarComando(texto){
 
 /* ============================== kubectl ============================== */
 function kubectl(a){
+  { const CON_VALOR = ["-n","--namespace","--context","--kubeconfig","-s","--server","--cluster","--user","--as"]; const pre = [];
+    while (a.length > 1 && /^-/.test(a[0]) && a[0] !== "--"){ if (CON_VALOR.includes(a[0])){ pre.push(a[0], a[1]); a = a.slice(2); } else { pre.push(a[0]); a = a.slice(1); } }
+    if (pre.length && a.length) a = [a[0], ...pre, ...a.slice(1)]; }
   if (!a.length){ out("kubectl controls the Kubernetes cluster manager.\n\n Find more information at: https://kubernetes.io/docs/reference/kubectl/\n\n(en el juego: escribe «help»)"); return 0; }
   const verbo = a[0];
   const {f, pos, tras} = flags(a.slice(1), verbo);
@@ -4950,7 +4959,7 @@ function clusterNuevoParcial(nombre){
    ========================================================================== */
 "use strict";
 
-const VERSION_JUEGO = "3.7";
+const VERSION_JUEGO = "3.7.1";
 const CLAVE_PARTIDA = "eksquest3";
 const NUEVOS_AL_PRINCIPIO = 6;   // la v3.1 metió 6 niveles nuevos delante: los de la v2/3.0 suben 6 puestos
 let P = {hechos:{}, actual:1, pistas:{}, solucion:{}};

@@ -18,7 +18,7 @@ Empieza en *«¿cómo se llama este Pod?»* y llega a mirar **por dentro** los c
 |---|---|
 | **Online** | Entra en **https://robertocifre.github.io/cluster-en-llamas/**: no hay que instalar nada. |
 | **Solo el fichero** | Descarga [`cluster-en-llamas.html`](https://github.com/RobertoCifre/cluster-en-llamas/releases/latest/download/cluster-en-llamas.html) de la última versión y ábrelo con doble clic. Vale cualquier navegador moderno y funciona sin Internet. |
-| **Docker** | `docker build -f docker/Dockerfile -t cluster-en-llamas:3.7 .` y después `docker run -d -p 8080:8080 --read-only --tmpfs /tmp cluster-en-llamas:3.7`; abre http://localhost:8080 |
+| **Docker** | `docker build -f docker/Dockerfile -t cluster-en-llamas:3.7.1 .` y después `docker run -d -p 8080:8080 --read-only --tmpfs /tmp cluster-en-llamas:3.7.1`; abre http://localhost:8080 |
 
 No necesitas cuenta de AWS, ni cluster, ni `kubectl`, ni `kind`: el cluster es simulado.
 
@@ -76,10 +76,12 @@ node tests/chuletas.test.js       # las chuletas tienen los comandos de todos lo
 node tests/tuberias.test.js       # las tuberías (grep, head, awk, sed…) dan lo mismo que en Linux
 node tests/shell.test.js          # la shell dentro de un Pod (variables, tuberías, for, if…) como en busybox
 node tests/comandos-chuletas.test.js  # todos los comandos de las chuletas funcionan en el simulador
+node tests/variantes.test.js      # el mismo comando escrito de formas distintas (-oyaml, -n delante…) da lo mismo
+node tests/pistas.test.js         # los comandos de las pistas funcionan
 node tests/simulacro.test.js      # ~12.000 comandos reales de kubectl y aws en todos los niveles: sin errores ni «no soportado»
 ```
 
-Las ocho pruebas se ejecutan solas en GitHub en cada cambio (la insignia de arriba).
+Las diez pruebas se ejecutan solas en GitHub en cada cambio (la insignia de arriba).
 
 | Ruta | Contenido |
 |---|---|
