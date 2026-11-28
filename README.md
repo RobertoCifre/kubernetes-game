@@ -1,24 +1,24 @@
-# ⎈ EKS Quest — un juego para aprender Kubernetes
+# 🔥 Cluster en Llamas — un juego para aprender Kubernetes
 
-[![tests](https://github.com/RobertoCifre/kubernetes-game/actions/workflows/tests.yml/badge.svg)](https://github.com/RobertoCifre/kubernetes-game/actions/workflows/tests.yml)
+[![tests](https://github.com/RobertoCifre/cluster-en-llamas/actions/workflows/tests.yml/badge.svg)](https://github.com/RobertoCifre/cluster-en-llamas/actions/workflows/tests.yml)
 
-**▶ Juega online: https://robertocifre.github.io/kubernetes-game/**
+**▶ Juega online: https://robertocifre.github.io/cluster-en-llamas/**
 
-**Aprende `kubectl` y Amazon EKS arreglando un cluster roto, en el navegador y sin instalar nada.**
+**Aprende `kubectl` y Amazon EKS apagando incendios en un cluster: en el navegador y sin instalar nada.**
 
-EKS Quest es un juego gratuito de un solo fichero. Dentro de la página corre un cluster de EKS simulado, y cada nivel lo rompe de una forma distinta: Pods atascados en `Pending`, imágenes que no existen, Services sin endpoints, sondas que fallan, OOMKills, permisos que faltan, nodos que se caen… Se arregla con los **comandos reales** (`kubectl get`, `describe`, `logs`, `exec`, `edit`, `rollout`, `aws eks …`), así que todo lo que practicas te sirve en un cluster de verdad.
+Cluster en Llamas es un juego gratuito de un solo fichero. Dentro de la página corre un cluster de EKS simulado, y cada nivel lo rompe de una forma distinta: Pods atascados en `Pending`, imágenes que no existen, Services sin endpoints, sondas que fallan, OOMKills, permisos que faltan, nodos que se caen… Se arregla con los **comandos reales** (`kubectl get`, `describe`, `logs`, `exec`, `edit`, `rollout`, `aws eks …`), así que todo lo que practicas te sirve en un cluster de verdad.
 
 Empieza en *«¿cómo se llama este Pod?»* y llega a mirar **por dentro** los contenedores y los nodos: el PID 1, los cgroups, las capabilities de Linux, el token de la ServiceAccount, los init containers, los sidecars, los contenedores de depuración, `crictl`, las reglas de kube-proxy, los ClusterRoles y EKS Pod Identity. Termina con un examen final al estilo de la CKA.
 
-![EKS Quest: misión a la izquierda, terminal a la derecha](docs/captura.png)
+![Cluster en Llamas: misión a la izquierda, terminal a la derecha](docs/captura.png)
 
 ## Cómo jugar
 
 | Opción | Cómo |
 |---|---|
-| **Online** | Entra en **https://robertocifre.github.io/kubernetes-game/**: no hay que instalar nada. |
-| **Solo el fichero** | Descarga [`eks-quest.html`](https://github.com/RobertoCifre/kubernetes-game/releases/latest/download/eks-quest.html) de la última versión y ábrelo con doble clic. Vale cualquier navegador moderno y funciona sin Internet. |
-| **Docker** | `docker build -f docker/Dockerfile -t eks-quest:3.4 .` y después `docker run -d -p 8080:8080 --read-only --tmpfs /tmp eks-quest:3.4`; abre http://localhost:8080 |
+| **Online** | Entra en **https://robertocifre.github.io/cluster-en-llamas/**: no hay que instalar nada. |
+| **Solo el fichero** | Descarga [`cluster-en-llamas.html`](https://github.com/RobertoCifre/cluster-en-llamas/releases/latest/download/cluster-en-llamas.html) de la última versión y ábrelo con doble clic. Vale cualquier navegador moderno y funciona sin Internet. |
+| **Docker** | `docker build -f docker/Dockerfile -t cluster-en-llamas:3.5 .` y después `docker run -d -p 8080:8080 --read-only --tmpfs /tmp cluster-en-llamas:3.5`; abre http://localhost:8080 |
 
 No necesitas cuenta de AWS, ni cluster, ni `kubectl`, ni `kind`: el cluster es simulado.
 
@@ -66,10 +66,10 @@ Es un simulador, no un cluster real. Entiende los comandos y opciones que necesi
 
 ## Construirlo desde el código
 
-`eks-quest.html` se genera a partir de `src/` y `chuletas/`:
+`cluster-en-llamas.html` se genera a partir de `src/` y `chuletas/`:
 
 ```bash
-python construir.py               # Python 3; genera eks-quest.html
+python construir.py               # Python 3; genera cluster-en-llamas.html
 node tests/niveles.test.js        # juega los 76 niveles con su solución
 node tests/trampas.test.js        # los «arreglos» tramposos o incorrectos NO deben valer
 node tests/chuletas.test.js       # las chuletas tienen los comandos de todos los niveles
@@ -90,12 +90,12 @@ Las cuatro pruebas se ejecutan solas en GitHub en cada cambio (la insignia de ar
 
 ## Licencia
 
-- Código (`src/`, `tests/`, `docker/`, `construir.py`, `eks-quest.html`): [MIT](LICENSE).
-- Material didáctico (`chuletas/`, `docs/`): [CC BY 4.0](LICENSE-docs). `eks-quest.html` lleva dentro las chuletas: esa parte sigue siendo CC BY 4.0.
+- Código (`src/`, `tests/`, `docker/`, `construir.py`, `cluster-en-llamas.html`): [MIT](LICENSE).
+- Material didáctico (`chuletas/`, `docs/`): [CC BY 4.0](LICENSE-docs). `cluster-en-llamas.html` lleva dentro las chuletas: esa parte sigue siendo CC BY 4.0.
 - No incluye código de terceros. La imagen Docker se construye sobre [`nginxinc/nginx-unprivileged`](https://hub.docker.com/r/nginxinc/nginx-unprivileged): si distribuyes la imagen construida, también se aplican las licencias de nginx y de Alpine Linux.
 
 Kubernetes® y CKA (Certified Kubernetes Administrator) son marcas de The Linux Foundation. Amazon EKS y AWS son marcas de Amazon.com, Inc. o sus filiales. Este es un proyecto independiente, sin relación con ellas ni respaldado por ellas. El examen final se inspira en las prácticas públicas de la CKA; no contiene preguntas reales del examen. El cluster del juego es simulado: el número de cuenta (`123456789012`), los IDs de recursos y las salidas de los comandos son ejemplos.
 
 ---
 
-**English:** EKS Quest is a free browser game (in Spanish) to learn `kubectl` and Amazon EKS by fixing a simulated cluster: 76 levels from the basics to Pod internals (cgroups, capabilities, sidecars, crictl, kube-proxy) and a timed CKA-style final lab. Play at https://robertocifre.github.io/kubernetes-game/ — code under MIT, learning material under CC BY 4.0.
+**English:** *Cluster en Llamas* («Cluster on Fire») is a free browser game (in Spanish) to learn `kubectl` and Amazon EKS by fixing a simulated cluster: 76 levels from the basics to Pod internals (cgroups, capabilities, sidecars, crictl, kube-proxy) and a timed CKA-style final lab. Play at https://robertocifre.github.io/cluster-en-llamas/ — code under MIT, learning material under CC BY 4.0.

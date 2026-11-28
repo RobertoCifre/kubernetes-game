@@ -18,11 +18,11 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-      - name: Rebuild the game and check it matches the committed eks-quest.html
+      - name: Rebuild the game and check it matches the committed cluster-en-llamas.html
         run: |
-          cp eks-quest.html /tmp/committed.html
+          cp cluster-en-llamas.html /tmp/committed.html
           python construir.py
-          cmp eks-quest.html /tmp/committed.html
+          cmp cluster-en-llamas.html /tmp/committed.html
       - name: All levels can be solved
         run: node tests/niveles.test.js
       - name: Wrong or tricky fixes do not pass

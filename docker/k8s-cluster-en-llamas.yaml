@@ -1,26 +1,26 @@
-# Despliega EKS Quest DENTRO de un cluster de Kubernetes de verdad (práctica extra).
+# Despliega Cluster en Llamas DENTRO de un cluster de Kubernetes de verdad (práctica extra).
 # La imagen tiene que estar en un registro al que lleguen los nodos (ECR, GHCR, Docker Hub…). Ver LEEME-DOCKER.md.
-# Sustituye <IMAGEN> por su URI, p. ej. 123456789012.dkr.ecr.eu-west-1.amazonaws.com/eks-quest:3.4
-# (en kind/minikube vale la imagen local: kind load docker-image eks-quest:3.4)
+# Sustituye <IMAGEN> por su URI, p. ej. 123456789012.dkr.ecr.eu-west-1.amazonaws.com/cluster-en-llamas:3.5
+# (en kind/minikube vale la imagen local: kind load docker-image cluster-en-llamas:3.5)
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: eks-quest
+  name: cluster-en-llamas
   labels:
     pod-security.kubernetes.io/enforce: restricted   # el contenedor es no-root: pasa el nivel más estricto
 ---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: eks-quest
-  namespace: eks-quest
+  name: cluster-en-llamas
+  namespace: cluster-en-llamas
 spec:
   replicas: 2
   selector:
-    matchLabels: {app: eks-quest}
+    matchLabels: {app: cluster-en-llamas}
   template:
     metadata:
-      labels: {app: eks-quest}
+      labels: {app: cluster-en-llamas}
     spec:
       securityContext:
         runAsNonRoot: true
@@ -51,10 +51,10 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: eks-quest
-  namespace: eks-quest
+  name: cluster-en-llamas
+  namespace: cluster-en-llamas
 spec:
-  selector: {app: eks-quest}
+  selector: {app: cluster-en-llamas}
   ports:
   - port: 80
     targetPort: 8080

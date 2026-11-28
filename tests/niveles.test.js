@@ -1,11 +1,11 @@
 // Juega los 76 niveles del simulador con su solución y comprueba que ninguno empieza resuelto.
-// Uso: node tests/niveles.test.js   (probado con Node 24; lee ../eks-quest.html, así que constrúyelo antes con python construir.py)
+// Uso: node tests/niveles.test.js   (probado con Node 24; lee ../cluster-en-llamas.html, así que constrúyelo antes con python construir.py)
 const fs = require("fs");
 global.SALIDA_PRUEBAS = []; global.EDITOR_PRUEBAS = [];
 global.document = undefined; global.window = {getSelection:() => ({toString:() => ""})};
 global.localStorage = {getItem:() => null, setItem(){}, removeItem(){}};
 global.confirm = () => true;
-let code = fs.readFileSync(__dirname + "/../eks-quest.html", "utf8").match(/<script>([\s\S]*)<\/script>/)[1].replace(/arrancarUI\(\);\s*$/, "");
+let code = fs.readFileSync(__dirname + "/../cluster-en-llamas.html", "utf8").match(/<script>([\s\S]*)<\/script>/)[1].replace(/arrancarUI\(\);\s*$/, "");
 code = code.replace('const $ = id => document.getElementById(id);', 'const $ = id => null;');
 eval(code + "\n;global.API={get S(){return S}, get P(){return P}, NIVELES, MAX, irA, ejecutarLinea, reconciliar, avanzarReloj, obj, listos, eps, comprobar, estadoDeployment, dObj, clusterNuevo, get MODO(){return MODO}};");
 const A = global.API;

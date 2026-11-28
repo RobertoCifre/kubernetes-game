@@ -1,17 +1,17 @@
-# EKS Quest 3.4 — solo el juego del navegador (un único HTML con los 76 niveles y las chuletas dentro).
+# Cluster en Llamas 3.5 — solo el juego del navegador (un único HTML con los 76 niveles y las chuletas dentro).
 # nginx SIN root (usuario 101, puerto 8080); el HTML es de root y de solo lectura.
 #
-# Construir (desde la carpeta raíz del proyecto):  docker build -f docker/Dockerfile -t eks-quest:3.4 .
-# Ejecutar:   docker run -d --name eks-quest -p 8080:8080 --read-only --tmpfs /tmp eks-quest:3.4
+# Construir (desde la carpeta raíz del proyecto):  docker build -f docker/Dockerfile -t cluster-en-llamas:3.5 .
+# Ejecutar:   docker run -d --name cluster-en-llamas -p 8080:8080 --read-only --tmpfs /tmp cluster-en-llamas:3.5
 # Abrir:      http://localhost:8080
 FROM nginxinc/nginx-unprivileged:1.28-alpine
 
-LABEL org.opencontainers.image.title="eks-quest" \
-      org.opencontainers.image.version="3.4" \
-      org.opencontainers.image.description="EKS Quest: browser game to learn Kubernetes (kubectl) and Amazon EKS — 76 levels, Spanish"
+LABEL org.opencontainers.image.title="cluster-en-llamas" \
+      org.opencontainers.image.version="3.5" \
+      org.opencontainers.image.description="Cluster en Llamas: browser game to learn Kubernetes (kubectl) and Amazon EKS — 76 levels, Spanish"
 
 COPY --chmod=0444 docker/nginx-default.conf /etc/nginx/conf.d/default.conf
-COPY --chmod=0444 eks-quest.html /usr/share/nginx/html/index.html
+COPY --chmod=0444 cluster-en-llamas.html /usr/share/nginx/html/index.html
 
 EXPOSE 8080
 USER 101

@@ -1,7 +1,7 @@
-# EKS Quest — los 76 niveles (especificación y solucionario)
+# Cluster en Llamas — los 76 niveles (especificación y solucionario)
 
 > ⚠️ **SPOILERS.** Este documento tiene las soluciones. Úsalo solo cuando te atasques de verdad, o para repasar después de jugar.
-> Es también la **especificación** del juego del navegador (`eks-quest.html`): mismos niveles, mismos nombres, mismas comprobaciones. Las soluciones usan comandos reales de `kubectl` y `aws`, así que casi todas valen igual en un cluster de verdad (los avisos «⚠️ En EKS real» dicen dónde cambia algo).
+> Es también la **especificación** del juego del navegador (`cluster-en-llamas.html`): mismos niveles, mismos nombres, mismas comprobaciones. Las soluciones usan comandos reales de `kubectl` y `aws`, así que casi todas valen igual en un cluster de verdad (los avisos «⚠️ En EKS real» dicen dónde cambia algo).
 
 ## Reglas comunes
 

@@ -3,7 +3,7 @@
 const fs = require("fs");
 global.SALIDA_PRUEBAS = []; global.EDITOR_PRUEBAS = [];
 global.window = {getSelection:() => ({toString:() => ""})}; global.localStorage = {getItem:() => null, setItem(){}, removeItem(){}}; global.confirm = () => true;
-const html = fs.readFileSync(require("path").join(__dirname, "..", "eks-quest.html"), "utf8");
+const html = fs.readFileSync(require("path").join(__dirname, "..", "cluster-en-llamas.html"), "utf8");
 let code = html.match(/<script>([\s\S]*)<\/script>/)[1].replace(/arrancarUI\(\);\s*$/, "").replace('const $ = id => document.getElementById(id);', 'const $ = id => null;');
 eval(code + "\n;global.API={get S(){return S}, NIVELES, irA, ejecutarLinea, reconciliar, avanzarReloj, clusterNuevo, get MODO(){return MODO}};");
 const A = global.API; let marca = 0;

@@ -1,9 +1,9 @@
 // Soluciones tramposas o incorrectas NO deben superar niveles, y una ráfaga de comandos no debe provocar errores internos.
-// Uso: node tests/trampas.test.js   (probado con Node 24; lee ../eks-quest.html, así que constrúyelo antes con python construir.py)
+// Uso: node tests/trampas.test.js   (probado con Node 24; lee ../cluster-en-llamas.html, así que constrúyelo antes con python construir.py)
 const fs = require("fs");
 global.SALIDA_PRUEBAS = []; global.EDITOR_PRUEBAS = [];
 global.window = {getSelection:() => ({toString:() => ""})}; global.localStorage = {getItem:() => null, setItem(){}, removeItem(){}}; global.confirm = () => true;
-let code = fs.readFileSync(__dirname + "/../eks-quest.html", "utf8").match(/<script>([\s\S]*)<\/script>/)[1].replace(/arrancarUI\(\);\s*$/, "").replace('const $ = id => document.getElementById(id);', 'const $ = id => null;');
+let code = fs.readFileSync(__dirname + "/../cluster-en-llamas.html", "utf8").match(/<script>([\s\S]*)<\/script>/)[1].replace(/arrancarUI\(\);\s*$/, "").replace('const $ = id => document.getElementById(id);', 'const $ = id => null;');
 eval(code + "\n;global.API={get S(){return S}, get P(){return P}, NIVELES, MAX, irA, ejecutarLinea, reconciliar, avanzarReloj, clusterNuevo, get MODO(){return MODO}};");
 const A = global.API; let fallos = 0, marca = 0;
 const sal = () => { const r = SALIDA_PRUEBAS.slice(marca).map(x => x.t).join("\n"); marca = SALIDA_PRUEBAS.length; return r; };
@@ -33,7 +33,7 @@ console.log("== el Mundo 1 es opcional; desde el Mundo 2, en orden ==");
   for (const k of Object.keys(A.P.hechos)) delete A.P.hechos[k]; A.P.hechos[1] = 100;
   o = x("importar " + cod); ok(JSON.stringify(A.P.hechos) === antes, "«importar <código>» recupera exactamente los niveles", o);
   o = x("importar esto-no-es-una-partida"); ok(/no es una partida/.test(o) && JSON.stringify(A.P.hechos) === antes, "un código inválido se rechaza sin tocar la partida", o);
-  o = x("importar EKSQ1:" + Buffer.from(JSON.stringify({juego:"eks-quest", partida:{hechos:{"1":100, "2":80}, actual:2}})).toString("base64")); ok(A.P.hechos[2] === 80, "admite el contenido del fichero .json (envuelto en código)", o);
+  o = x("importar EKSQ1:" + Buffer.from(JSON.stringify({juego:"cluster-en-llamas", partida:{hechos:{"1":100, "2":80}, actual:2}})).toString("base64")); ok(A.P.hechos[2] === 80, "admite el contenido del fichero .json (envuelto en código)", o);
   for (const k of Object.keys(A.P.hechos)) delete A.P.hechos[k]; Object.assign(A.P.hechos, JSON.parse(guarda)); }
 
 console.log("== soluciones tramposas o incorrectas ==");

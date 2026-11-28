@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""construir.py — empaqueta el juego del navegador en UN solo fichero: eks-quest.html
+"""construir.py — empaqueta el juego del navegador en UN solo fichero: cluster-en-llamas.html
 
 Junta src/plantilla.html + src/estilo.css + los .js de src/ (en orden) y mete dentro
 las chuletas (CHULETA*.md de esta carpeta o de chuletas/) para que el HTML funcione sin nada más,
@@ -50,7 +50,7 @@ def main() -> int:
     if re.search(r"/\*(CSS|JS|CHULETAS)\*/", html):
         log.error("quedan marcadores sin sustituir en la plantilla")
         return 1
-    destino = raiz / "eks-quest.html"
+    destino = raiz / "cluster-en-llamas.html"
     destino.write_text(html, encoding="utf-8", newline="\n")
     log.info("escrito %s (%d KB, %d chuletas: %s)", destino.name, len(html.encode()) // 1024,
              len(chuletas), ", ".join(chuletas) or "-")

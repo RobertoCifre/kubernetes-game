@@ -4,7 +4,7 @@
    ========================================================================== */
 "use strict";
 
-const VERSION_JUEGO = "3.4";
+const VERSION_JUEGO = "3.5";
 const CLAVE_PARTIDA = "eksquest3";
 const NUEVOS_AL_PRINCIPIO = 6;   // la v3.1 metió 6 niveles nuevos delante: los de la v2/3.0 suben 6 puestos
 let P = {hechos:{}, actual:1, pistas:{}, solucion:{}};
@@ -135,15 +135,15 @@ function verSolucion(){
 function pctTareas(n){ const t = n.tareas || []; if (!t.length) return 0; let b = 0; for (const x of t){ try { if (x.ok()) b++; } catch(e){} } return Math.round(100 * b / t.length); }
 
 /* ---------- copia de la partida: fichero .json o código para copiar/pegar ---------- */
-function codigoPartida(){ return "EKSQ1:" + b64e(JSON.stringify({juego:"eks-quest", version:VERSION_JUEGO, fecha:new Date().toISOString(), partida:P})); }
+function codigoPartida(){ return "EKSQ1:" + b64e(JSON.stringify({juego:"cluster-en-llamas", version:VERSION_JUEGO, fecha:new Date().toISOString(), partida:P})); }
 function exportarPartida(){
   const codigo = codigoPartida();
   P.ultimaCopia = Date.now(); guardarPartida();
   if (typeof document === "undefined"){ out(codigo); return codigo; }
   try {
     const a = document.createElement("a");
-    a.href = "data:application/json;charset=utf-8," + encodeURIComponent(JSON.stringify({juego:"eks-quest", version:VERSION_JUEGO, fecha:new Date().toISOString(), partida:P}, null, 1));
-    a.download = `eks-quest-partida-${new Date().toISOString().slice(0, 10)}.json`;
+    a.href = "data:application/json;charset=utf-8," + encodeURIComponent(JSON.stringify({juego:"cluster-en-llamas", version:VERSION_JUEGO, fecha:new Date().toISOString(), partida:P}, null, 1));
+    a.download = `cluster-en-llamas-partida-${new Date().toISOString().slice(0, 10)}.json`;
     document.body.appendChild(a); a.click(); a.remove();
   } catch(e){}
   out(`💾 Partida guardada en un fichero (${Object.keys(P.hechos).length}/${MAX} niveles · ${xpTotal()} XP): mira tus Descargas.\nTambién puedes copiar este código y guardarlo donde quieras (una nota, un correo…). Con «importar <código>» o el botón 📂 la recuperas, en este u otro navegador:`, "c-ok");
@@ -156,7 +156,7 @@ function importarPartida(texto){
   const t = String(texto || "").trim();
   try { datos = t.startsWith("EKSQ1:") ? JSON.parse(b64d(t.slice(6))) : JSON.parse(t); } catch(e){ datos = null; }
   const np = datos && (datos.partida || datos);
-  if (!np || typeof np.hechos !== "object" || np.hechos === null){ out("❌ Eso no es una partida de EKS Quest (ni un fichero .json guardado con 💾, ni un código EKSQ1:…).", "c-err"); return false; }
+  if (!np || typeof np.hechos !== "object" || np.hechos === null){ out("❌ Eso no es una partida de Cluster en Llamas (ni un fichero .json guardado con 💾, ni un código EKSQ1:…).", "c-err"); return false; }
   const actuales = Object.keys(P.hechos).length, nuevos = Object.keys(np.hechos).length;
   if (actuales > nuevos && typeof confirm === "function" && typeof document !== "undefined" && !confirm(`La partida que cargas tiene ${nuevos} niveles y la actual ${actuales}. ¿Reemplazar la actual?`)) return false;
   P = Object.assign({hechos:{}, actual:1, pistas:{}, solucion:{}}, np);
@@ -188,7 +188,7 @@ function superar(){
   if (rangoAhora !== rangoAntes){ const pr = proximoRango(); pintarHTML(`<div class="ascenso">🎖️ ¡ASCENSO! Ahora eres <b>${escHTML(rangoAhora)}</b>${pr ? `<br><span class="c-dim">Siguiente rango: ${escHTML(pr.nombre)} · te faltan ${pr.faltan} XP</span>` : "<br>Has llegado al rango máximo."}</div>`); }
   pedirPersistencia(); recordarCopia();
   if (n.alSuperar) n.alSuperar();
-  if (Object.keys(P.hechos).length === MAX) pintarHTML(`<div class="gana">🏆 ¡HAS COMPLETADO EKS QUEST! ${xpTotal()} XP · ${escHTML(rango())}<br>Siguiente paso: practícalo en un cluster de verdad (kind o minikube en tu PC, o un EKS de pruebas).</div>`);
+  if (Object.keys(P.hechos).length === MAX) pintarHTML(`<div class="gana">🏆 ¡HAS APAGADO TODOS LOS INCENDIOS DE CLUSTER EN LLAMAS! ${xpTotal()} XP · ${escHTML(rango())}<br>Siguiente paso: practícalo en un cluster de verdad (kind o minikube en tu PC, o un EKS de pruebas).</div>`);
   if (typeof document !== "undefined" && $("mapa")) pintarPanel();
 }
 function comprobar(silencio){
@@ -380,12 +380,18 @@ function abrirChuletas(cual){
 /* ---------- arranque ---------- */
 function bienvenida(estado){
   pintarHTML(`<pre class="logo">
- ███████╗██╗  ██╗███████╗     ██████╗ ██╗   ██╗███████╗███████╗████████╗
- ██╔════╝██║ ██╔╝██╔════╝    ██╔═══██╗██║   ██║██╔════╝██╔════╝╚══██╔══╝
- █████╗  █████╔╝ ███████╗    ██║   ██║██║   ██║█████╗  ███████╗   ██║
- ██╔══╝  ██╔═██╗ ╚════██║    ██║▄▄ ██║██║   ██║██╔══╝  ╚════██║   ██║
- ███████╗██║  ██╗███████║    ╚██████╔╝╚██████╔╝███████╗███████║   ██║
- ╚══════╝╚═╝  ╚═╝╚══════╝     ╚══▀▀═╝  ╚═════╝ ╚══════╝╚══════╝   ╚═╝  v${VERSION_JUEGO}</pre>`);
+  ██████╗██╗     ██╗   ██╗███████╗████████╗███████╗██████╗
+ ██╔════╝██║     ██║   ██║██╔════╝╚══██╔══╝██╔════╝██╔══██╗
+ ██║     ██║     ██║   ██║███████╗   ██║   █████╗  ██████╔╝
+ ██║     ██║     ██║   ██║╚════██║   ██║   ██╔══╝  ██╔══██╗
+ ╚██████╗███████╗╚██████╔╝███████║   ██║   ███████╗██║  ██║
+  ╚═════╝╚══════╝ ╚═════╝ ╚══════╝   ╚═╝   ╚══════╝╚═╝  ╚═╝
+ ███████╗███╗   ██╗   ██╗     ██╗      █████╗ ███╗   ███╗ █████╗ ███████╗
+ ██╔════╝████╗  ██║   ██║     ██║     ██╔══██╗████╗ ████║██╔══██╗██╔════╝
+ █████╗  ██╔██╗ ██║   ██║     ██║     ███████║██╔████╔██║███████║███████╗
+ ██╔══╝  ██║╚██╗██║   ██║     ██║     ██╔══██║██║╚██╔╝██║██╔══██║╚════██║
+ ███████╗██║ ╚████║   ███████╗███████╗██║  ██║██║ ╚═╝ ██║██║  ██║███████║
+ ╚══════╝╚═╝  ╚═══╝   ╚══════╝╚══════╝╚═╝  ╚═╝╚═╝     ╚═╝╚═╝  ╚═╝╚══════╝  v${VERSION_JUEGO}</pre>`);
   out(`Cluster simulado «eks-juego» · cuenta de laboratorio · Kubernetes ${K8S_MINOR} · 1 nodo t3.medium.
 76 niveles en 10 mundos, de «¿cómo se llama este Pod?» a mirar los cgroups por dentro. Los primeros pasos (Mundo 1) son opcionales: puedes empezar por el Mundo 2 («nivel 14»). Desde ahí se desbloquean en orden («Modo EXPERTO» los abre todos). Es un simulador: después, practícalo en un cluster real (kind, Killercoda o un EKS de pruebas). Los comandos son los REALES de kubectl y aws: lo que aprendas aquí vale en EKS.
 «help» = comandos · «mapa» = niveles · 📚 Chuletas arriba · ↑/↓ historial · Tab autocompleta.`, "c-dim");
