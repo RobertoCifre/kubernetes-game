@@ -13,8 +13,8 @@ Es una **simulación**: no se conecta a AWS ni a ningún cluster. No necesita cu
 Desde la carpeta raíz del proyecto:
 
 ```bash
-docker build -f docker/Dockerfile -t cluster-en-llamas:3.7.1 .
-docker run -d --name cluster-en-llamas -p 8080:8080 --read-only --tmpfs /tmp cluster-en-llamas:3.7.1
+docker build -f docker/Dockerfile -t cluster-en-llamas:3.7.2 .
+docker run -d --name cluster-en-llamas -p 8080:8080 --read-only --tmpfs /tmp cluster-en-llamas:3.7.2
 # abre http://localhost:8080
 ```
 
@@ -39,8 +39,8 @@ Para la C, en el PC de origen:
 
 ```bash
 # imagen para Intel/AMD (amd64) y ARM (arm64: Mac con Apple Silicon, Raspberry Pi 4/5…)
-docker buildx build --platform linux/amd64,linux/arm64 -f docker/Dockerfile -t cluster-en-llamas:3.7.1 --load .
-docker save cluster-en-llamas:3.7.1 -o cluster-en-llamas-3.7.tar
+docker buildx build --platform linux/amd64,linux/arm64 -f docker/Dockerfile -t cluster-en-llamas:3.7.2 --load .
+docker save cluster-en-llamas:3.7.2 -o cluster-en-llamas-3.7.tar
 ```
 
 Exportar las dos arquitecturas en un solo `.tar` necesita el almacén de imágenes de containerd (Docker Desktop lo trae activado en las versiones recientes). Si no lo tienes, quita `--platform` y exporta solo la de tu máquina.
@@ -51,9 +51,9 @@ Exportar las dos arquitecturas en un solo `.tar` necesita el almacén de imágen
 
 ```bash
 # kind: carga la imagen local en el cluster
-kind load docker-image cluster-en-llamas:3.7.1
-# (en EKS: sube la imagen a ECR y usa su URI en lugar de cluster-en-llamas:3.7.1)
-sed 's#<IMAGEN>#cluster-en-llamas:3.7.1#' docker/k8s-cluster-en-llamas.yaml | kubectl apply -f -
+kind load docker-image cluster-en-llamas:3.7.2
+# (en EKS: sube la imagen a ECR y usa su URI en lugar de cluster-en-llamas:3.7.2)
+sed 's#<IMAGEN>#cluster-en-llamas:3.7.2#' docker/k8s-cluster-en-llamas.yaml | kubectl apply -f -
 kubectl port-forward svc/cluster-en-llamas 8080:80 -n cluster-en-llamas       # y abre http://localhost:8080
 ```
 

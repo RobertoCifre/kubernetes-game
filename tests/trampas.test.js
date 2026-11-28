@@ -4,7 +4,7 @@ const fs = require("fs");
 global.SALIDA_PRUEBAS = []; global.EDITOR_PRUEBAS = [];
 global.window = {getSelection:() => ({toString:() => ""})}; global.localStorage = {getItem:() => null, setItem(){}, removeItem(){}}; global.confirm = () => true;
 let code = fs.readFileSync(__dirname + "/../cluster-en-llamas.html", "utf8").match(/<script>([\s\S]*)<\/script>/)[1].replace(/arrancarUI\(\);\s*$/, "").replace('const $ = id => document.getElementById(id);', 'const $ = id => null;');
-eval(code + "\n;global.API={get S(){return S}, get P(){return P}, NIVELES, MAX, irA, ejecutarLinea, reconciliar, avanzarReloj, clusterNuevo, get MODO(){return MODO}};");
+eval(code + "\n;global.API={get S(){return S}, get P(){return P}, NIVELES, MAX, irA, cargarPartida, ejecutarLinea, reconciliar, avanzarReloj, clusterNuevo, get MODO(){return MODO}};");
 const A = global.API; let fallos = 0, marca = 0;
 const sal = () => { const r = SALIDA_PRUEBAS.slice(marca).map(x => x.t).join("\n"); marca = SALIDA_PRUEBAS.length; return r; };
 const x = c => { marca = SALIDA_PRUEBAS.length; A.ejecutarLinea(c); A.reconciliar(); comprobar(true); return sal(); };
@@ -29,6 +29,14 @@ console.log("== todos los niveles abiertos ==");
   o = x("importar " + cod); ok(JSON.stringify(A.P.hechos) === antes, "«importar <código>» recupera exactamente los niveles", o);
   o = x("importar esto-no-es-una-partida"); ok(/no es una partida/.test(o) && JSON.stringify(A.P.hechos) === antes, "un código inválido se rechaza sin tocar la partida", o);
   o = x("importar EKSQ1:" + Buffer.from(JSON.stringify({juego:"cluster-en-llamas", partida:{hechos:{"1":100, "2":80}, actual:2}})).toString("base64")); ok(A.P.hechos[2] === 80, "admite el contenido del fichero .json (envuelto en código)", o);
+  o = x("importar EKSQ1:" + Buffer.from(JSON.stringify({partida:{hechos:{"1":100}, actual:30}})).toString("base64")); ok(A.P.actual === 30, "al cargar una partida vuelves al nivel en el que estabas (30), aunque haya anteriores sin hacer", o);
+  o = x("importar EKSQ1:" + Buffer.from(JSON.stringify({hechos:{"1":100}, actual:"x", pistas:null, solucion:[]})).toString("base64")); ok(A.P.actual === 2 && A.P.pistas && !Array.isArray(A.P.solucion), "una partida con campos rotos se corrige al cargarla", JSON.stringify(A.P));
+  console.log("== recargar la página ==");
+  { const getItemReal = global.localStorage.getItem, guardaP = JSON.stringify(A.P);
+    const conPartida = p => { global.localStorage.getItem = k => k === "eksquest3" ? JSON.stringify(p) : null; return A.cargarPartida(); };
+    ok(conPartida({hechos:{"1":100, "18":100}, actual:30, pistas:{}, solucion:{}}) === "ok" && A.P.actual === 30, "al recargar sigues en el nivel 30 aunque haya niveles anteriores sin hacer", A.P.actual);
+    ok(conPartida({hechos:{"1":100}, actual:999, pistas:null}) === "ok" && A.P.actual === 2 && A.P.pistas && typeof A.P.pistas === "object", "un nivel que no existe o unas pistas rotas se corrigen al recargar", JSON.stringify(A.P));
+    conPartida(JSON.parse(guardaP)); global.localStorage.getItem = getItemReal; }
   for (const k of Object.keys(A.P.hechos)) delete A.P.hechos[k]; Object.assign(A.P.hechos, JSON.parse(guarda)); }
 
 console.log("== soluciones tramposas o incorrectas ==");

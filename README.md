@@ -18,7 +18,7 @@ Empieza en *«¿cómo se llama este Pod?»* y llega a mirar **por dentro** los c
 |---|---|
 | **Online** | Entra en **https://robertocifre.github.io/cluster-en-llamas/**: no hay que instalar nada. |
 | **Solo el fichero** | Descarga [`cluster-en-llamas.html`](https://github.com/RobertoCifre/cluster-en-llamas/releases/latest/download/cluster-en-llamas.html) de la última versión y ábrelo con doble clic. Vale cualquier navegador moderno y funciona sin Internet. |
-| **Docker** | `docker build -f docker/Dockerfile -t cluster-en-llamas:3.7.1 .` y después `docker run -d -p 8080:8080 --read-only --tmpfs /tmp cluster-en-llamas:3.7.1`; abre http://localhost:8080 |
+| **Docker** | `docker build -f docker/Dockerfile -t cluster-en-llamas:3.7.2 .` y después `docker run -d -p 8080:8080 --read-only --tmpfs /tmp cluster-en-llamas:3.7.2`; abre http://localhost:8080 |
 
 No necesitas cuenta de AWS, ni cluster, ni `kubectl`, ni `kind`: el cluster es simulado.
 

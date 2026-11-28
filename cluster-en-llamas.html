@@ -4959,7 +4959,7 @@ function clusterNuevoParcial(nombre){
    ========================================================================== */
 "use strict";
 
-const VERSION_JUEGO = "3.7.1";
+const VERSION_JUEGO = "3.7.2";
 const CLAVE_PARTIDA = "eksquest3";
 const NUEVOS_AL_PRINCIPIO = 6;   // la v3.1 metió 6 niveles nuevos delante: los de la v2/3.0 suben 6 puestos
 let P = {hechos:{}, actual:1, pistas:{}, solucion:{}};
@@ -4969,10 +4969,16 @@ const escHTML = s => String(s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",
 
 /* ---------- partida ---------- */
 function guardarPartida(){ try { localStorage.setItem(CLAVE_PARTIDA, JSON.stringify(P)); } catch(e){} }
+// Una partida leída de localStorage o de un fichero: rellena lo que falte y conserva el nivel en el que estabas si existe.
+function normalizarPartida(j){
+  const q = Object.assign({hechos:{}, actual:1, pistas:{}, solucion:{}}, j);
+  for (const k of ["hechos", "pistas", "solucion"]) if (!q[k] || typeof q[k] !== "object" || Array.isArray(q[k])) q[k] = {};
+  return q;
+}
 function cargarPartida(){
   try {
     const j = JSON.parse(localStorage.getItem(CLAVE_PARTIDA));
-    if (j && j.hechos){ P = Object.assign({hechos:{}, actual:1, pistas:{}, solucion:{}}, j); P.actual = primerBloqueado() > P.actual ? P.actual : (siguientePendiente(1) || 1); return "ok"; }
+    if (j && j.hechos){ P = normalizarPartida(j); if (!nivelValido(P.actual)) P.actual = siguientePendiente(1) || 1; return "ok"; }
     const v2 = JSON.parse(localStorage.getItem("eksquest2"));
     if (v2 && v2.hechos){
       const mueve = o => Object.fromEntries(Object.entries(o || {}).map(([k, v]) => [String(parseInt(k, 10) + NUEVOS_AL_PRINCIPIO), v]));
@@ -4994,11 +5000,9 @@ const RANGOS = [[0, "🐣 Becario de Kubernetes"], [300, "📦 Junior de pods"],
 function rangoDe(x){ let r = RANGOS[0][1]; for (const [d, n] of RANGOS) if (x >= d) r = n; return r; }
 function rango(){ return rangoDe(xpTotal()); }
 function proximoRango(){ const x = xpTotal(); const s = RANGOS.find(([d]) => d > x); return s ? {nombre:s[1], faltan:s[0] - x} : null; }
-// El Mundo 1 (primeros pasos) es opcional y está siempre abierto. Desde el Mundo 2 los niveles van en orden.
-const esOpcional = id => !!NIVELES[id] && NIVELES[id].mundo === 1;
-function siguienteObligatorio(){ for (let k = 1; k <= MAX; k++) if (!esOpcional(k) && !(k in P.hechos)) return k; return null; }
-function primerBloqueado(){ for (let k = 1; k <= MAX; k++) if (!esOpcional(k) && !(k in P.hechos)) return k + 1; return MAX + 1; }   // el primero sin hacer está abierto; los de después, cerrados
-function desbloqueado(id){ return id >= 1 && id <= MAX; }   // todos los niveles abiertos: cada uno va a su ritmo (y en varios ordenadores no hace falta nada)
+// Todos los niveles están abiertos: cada uno va a su ritmo (y en varios ordenadores no hace falta nada).
+const nivelValido = id => Number.isInteger(id) && id >= 1 && id <= MAX;
+function desbloqueado(id){ return nivelValido(id); }
 function irANivel(id){
   if (!id){ irA(null); return; }
   irA(id);
@@ -5109,10 +5113,10 @@ function importarPartida(texto){
   if (!np || typeof np.hechos !== "object" || np.hechos === null){ out("❌ Eso no es una partida de Cluster en Llamas (ni un fichero .json guardado con 💾, ni un código EKSQ1:…).", "c-err"); return false; }
   const actuales = Object.keys(P.hechos).length, nuevos = Object.keys(np.hechos).length;
   if (actuales > nuevos && typeof confirm === "function" && typeof document !== "undefined" && !confirm(`La partida que cargas tiene ${nuevos} niveles y la actual ${actuales}. ¿Reemplazar la actual?`)) return false;
-  P = Object.assign({hechos:{}, actual:1, pistas:{}, solucion:{}}, np);
+  P = normalizarPartida(np);
   guardarPartida();
   out(`📂 Partida cargada: ${Object.keys(P.hechos).length}/${MAX} niveles · ${xpTotal()} XP · ${rango()}`, "c-ok");
-  irA(desbloqueado(P.actual) ? P.actual : (siguienteObligatorio() || 1));
+  irA(nivelValido(P.actual) ? P.actual : (siguientePendiente(1) || 1));
   return true;
 }
 function cargarDesdeFichero(){
