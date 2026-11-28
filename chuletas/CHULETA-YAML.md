@@ -47,6 +47,8 @@ spec:
         image: nginx:1.27-alpine
         ports:
         - containerPort: 80   # informativo: el puerto real lo decide la aplicación
+          name: http          # opcional: con nombre, un Service puede usar  targetPort: http
+          protocol: TCP
         resources:
           requests:           # lo que reserva el scheduler
             cpu: 100m
@@ -116,8 +118,11 @@ spec:
     app: ejemplo            # a qué Pods manda el tráfico (por labels)
   ports:
   - port: 80                # donde escucha el Service
-    targetPort: 80          # donde escucha el CONTENEDOR (8080 en nginx-unprivileged)
+    targetPort: 80          # donde escucha el CONTENEDOR (8080 en nginx-unprivileged), o el NOMBRE del puerto: http
+    # nodePort: 30080       # solo con type NodePort/LoadBalancer (30000-32767); si no lo pones, se elige uno
 ```
+
+Lo mismo sin YAML: `kubectl expose deployment <dep> --name=<svc> --port=80 --target-port=http --type=NodePort -n <ns>`.
 
 ## ConfigMap
 
@@ -282,7 +287,26 @@ spec:
           app: front         # DESDE quién se permite
     ports:
     - port: 80
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: permitir-desde-otro-namespace
+  namespace: pruebas
+spec:
+  podSelector: {}            # protege a todos los Pods de «pruebas»
+  policyTypes: ["Ingress"]
+  ingress:
+  - from:
+    - namespaceSelector:     # DESDE los Pods de otro namespace…
+        matchLabels:
+          kubernetes.io/metadata.name: otro-ns   # etiqueta que Kubernetes pone sola a cada namespace
+    ports:                   # …y SOLO a este puerto
+    - protocol: TCP
+      port: 9000
 ```
+
+`from` y `ports` en la misma regla = «desde ahí Y a ese puerto». Si pones `namespaceSelector: {}` abres a TODOS los namespaces. Las etiquetas de un namespace: `kubectl get ns --show-labels`.
 
 Las políticas se suman: lo que permita cualquiera de ellas, pasa. En EKS solo se aplican si la VPC CNI tiene `enableNetworkPolicy` (CHULETA-RED).
 

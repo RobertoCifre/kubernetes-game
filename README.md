@@ -79,6 +79,7 @@ node tests/simulacro.test.js      # ~12,000 real kubectl/aws commands across all
 ## License
 
 - Code (`src/`, `tests/`, `docker/`, `construir.py`, `eks-quest.html`): [MIT](LICENSE).
-- Learning material (`chuletas/`, `docs/`): [CC BY 4.0](LICENSE-docs).
+- Learning material (`chuletas/`, `docs/`): [CC BY 4.0](LICENSE-docs). `eks-quest.html` bundles the cheat sheets: that part stays under CC BY 4.0.
+- No third-party code is included. The Docker image is built on [`nginxinc/nginx-unprivileged`](https://hub.docker.com/r/nginxinc/nginx-unprivileged): if you distribute the built image, the licenses of nginx and Alpine Linux also apply to it.
 
-Kubernetes is a registered trademark of The Linux Foundation. Amazon EKS and AWS are trademarks of Amazon.com, Inc. or its affiliates. This is an independent project, not affiliated with or endorsed by them. The cluster in the game is simulated: the account ID (`123456789012`), resource IDs and command outputs are examples.
+Kubernetes® and CKA (Certified Kubernetes Administrator) are trademarks of The Linux Foundation. Amazon EKS and AWS are trademarks of Amazon.com, Inc. or its affiliates. This is an independent project, not affiliated with or endorsed by them. The final lab is inspired by publicly available CKA practice tasks; it does not contain real exam questions. The cluster in the game is simulated: the account ID (`123456789012`), resource IDs and command outputs are examples.

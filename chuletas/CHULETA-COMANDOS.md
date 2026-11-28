@@ -270,6 +270,7 @@ kubectl patch deployment <nombre> -n <ns> --type=json \
 #   otras rutas («0» = el primer contenedor de la lista; "value" = lo que quieras poner):
 #     /spec/template/spec/containers/0/command
 #     /spec/template/spec/containers/0/args
+#     /spec/template/spec/containers/0/ports      (con "op":"add" si el contenedor aún no declara puertos)
 #     /spec/template/spec/containers/0/readinessProbe/httpGet/path   (o …/port)
 #     /spec/template/spec/containers/0/livenessProbe/httpGet/path    (o …/port)
 #   "op": "replace" cambia un campo que existe · "add" lo crea · "remove" lo borra (sin "value")

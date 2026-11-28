@@ -81,7 +81,7 @@ const R = {
   73: [/crictl ps/, /crictl inspect <id> \| grep pid/, /kubectl debug node\//],
   74: [/\/proc\/<pid>\/cgroup/, /kubepods-<qos>/],
   75: [/iptables-save \| grep/, /DNAT/],
-  76: [/kubectl create clusterrole/, /kubectl create rolebinding \S+ --clusterrole=/, /kubectl drain/, /namespaceSelector/, /--type=NodePort/, /systemctl start kubelet/, /volumeMounts/, /--target-port/],
+  76: [/kubectl create clusterrole/, /kubectl create rolebinding \S+ --clusterrole=/, /kubectl drain/, /namespaceSelector/, /--type=NodePort/, /systemctl start kubelet/, /volumeMounts/, /--target-port/, /kubernetes\.io\/metadata\.name/, /name: http/, /containers\/0\/ports/],
 };
 let faltan = 0;
 for (const [n, pats] of Object.entries(R)) {
